@@ -301,7 +301,7 @@ function wa_link($plan){ global $me;
                 const r = await fetch('paypal_create_order.php', {
                   method: 'POST',
                   headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ plan }) // plus50 | plus120 | plus250
+                  body: JSON.stringify({ plan }) // PLUS50 | PLUS120 | PLUS250
                 });
                 if (!r.ok) {
                   const tx = await r.text().catch(()=> '');
@@ -336,9 +336,10 @@ function wa_link($plan){ global $me;
             alert('❌ No se pudo inicializar PayPal: '+(e.message||e));
           }
         }
-        renderBtn('#pp-plus50','plus50');
-        renderBtn('#pp-plus120','plus120');
-        renderBtn('#pp-plus250','plus250');
+        // IMPORTANTE: Enviamos en MAYÚSCULAS para coincidir con el catálogo del backend
+        renderBtn('#pp-plus50','PLUS50');
+        renderBtn('#pp-plus120','PLUS120');
+        renderBtn('#pp-plus250','PLUS250');
       </script>
     </div>
   <?php elseif ((int)$me['is_admin'] === 1): ?>
