@@ -60,18 +60,13 @@ function wa_link($plan){ global $me;
   .topline{display:flex;justify-content:space-between;align-items:center}
   .bad{background:#172554;border:1px solid #334155;border-radius:999px;padding:4px 10px;margin-left:8px}
   code{user-select:all}
-
-  /* Upload + mensajes */
   .item{display:flex;align-items:center;gap:10px;border:1px solid #334155;background:#0f172a;border-radius:10px;padding:10px;margin-top:8px}
   .item .url{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item.err{border-color:#7f1d1d;background:rgba(127,29,29,.15)}
-
-  /* Buscador rápido */
   .quick{display:grid;gap:10px}
   .searchbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .results{display:grid;gap:8px}
-  .r{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
-     background:#0f172a;border:1px solid #334155;border-radius:10px;padding:8px}
+  .r{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:8px}
   .r .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head><body><div class="wrap">
@@ -114,12 +109,11 @@ function wa_link($plan){ global $me;
     </p>
   </div>
 
-  
   <!-- SUBIR -->
   <div class="row row2" style="margin-top:14px">
     <div class="card">
-      <h3>Subir archivo</h3>    
-<?php if(!(int)$me['verified']): ?>
+      <h3>Subir archivo</h3>
+      <?php if(!(int)$me['verified']): ?>
         <p>❌ Debes <b>verificar tu correo</b> antes de subir archivos.</p>
       <?php else: ?>
         <form id="up" enctype="multipart/form-data">
@@ -128,24 +122,21 @@ function wa_link($plan){ global $me;
           <button class="btn" id="upBtn" style="margin-top:8px">Subir</button>
         </form>
         <div id="out" style="margin-top:10px"></div>
+
         <!-- BUSCADOR RÁPIDO -->
-  <div class="card" style="margin-top:14px">
-    <div class="quick">
-      <div class="searchbar">
-        <input id="q" class="input" placeholder="Buscar rápido… (nombre o parte de la URL)" autocomplete="off">
-        <button class="btn" id="qBtn" type="button">Buscar</button>
-        <a class="btn ghost" href="list.php">Abrir listado completo</a>
-      </div>
-      <p class="muted" id="qHint">Escribe para buscar. Se muestran hasta 10 coincidencias.</p>
-      <div class="results" id="qRes"></div>
-    </div>
-  </div> 
-      
-      <script>
+        <div class="card" style="margin-top:14px">
+          <div class="quick">
+            <div class="searchbar">
+              <input id="q" class="input" placeholder="Buscar rápido… (nombre o parte de la URL)" autocomplete="off">
+              <button class="btn" id="qBtn" type="button">Buscar</button>
+              <a class="btn ghost" href="list.php">Abrir listado completo</a>
+            </div>
+            <p class="muted" id="qHint">Escribe para buscar. Se muestran hasta 10 coincidencias.</p>
+            <div class="results" id="qRes"></div>
+          </div>
+        </div>
 
-  
-
-          
+        <script>
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
           const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\''.wa_link('Deluxe ($2.50/mes)').'\' target=\\"_blank\\">Plan Deluxe</a>"' ?>;
@@ -161,14 +152,12 @@ function wa_link($plan){ global $me;
 
           up?.addEventListener('submit', async e => {
             e.preventDefault();
-
             const f = fileI.files?.[0];
             if(!f){ msg(false,'<span>❌</span> Selecciona un archivo.'); return; }
             if (f.size > MAX_MB*1024*1024) {
               msg(false, `<span>❌</span> Tu límite es de <b>${MAX_MB}MB</b>.${deluxeCTA}`);
               return;
             }
-
             upBtn.disabled = true; const old=upBtn.textContent; upBtn.textContent='Subiendo…';
             try{
               const r = await fetch('upload.php', { method:'POST', body:new FormData(up) });
@@ -184,7 +173,6 @@ function wa_link($plan){ global $me;
               const text = await r.text();
               let j = null; try { j = JSON.parse(text); } catch {}
               if (!j) { msg(false, `<span>❌</span> Respuesta inesperada del servidor.`); return; }
-
               if (j.ok) {
                 const url = j.file.url;
                 msg(true, `
@@ -257,112 +245,87 @@ function wa_link($plan){ global $me;
     </div>
   </div>
 
-<?php
-  // Mostrar botones PayPal solo si hay Client ID configurado en Admin → Pagos
-<?php
-// --- PayPal: mostrar botones sólo si está configurado ---
-$pp_cid  = setting_get('paypal_client_id','');         // viene de Admin → Pagos
-$pp_mode = setting_get('paypal_mode','sandbox');       // sandbox | live
-?>
+  <?php
+    // --- PayPal: mostrar botones sólo si está configurado ---
+    $pp_cid  = setting_get('paypal_client_id','');   // viene de Admin → Pagos
+    $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox | live (no lo usamos aquí, pero queda por si acaso)
+  ?>
 
-<?php if ($pp_cid): ?>
-  <div class="card" style="margin-top:14px">
-    <h3>Pagos automáticos (PayPal)</h3>
-    <div class="plans">
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+50 archivos</div>
-        <div class="price">$1.37</div>
-        <div id="pp-plus50"></div>
+  <?php if ($pp_cid): ?>
+    <div class="card" style="margin-top:14px">
+      <h3>Pagos automáticos (PayPal)</h3>
+      <div class="plans">
+        <div class="plan">
+          <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+          <div class="title">+50 archivos</div>
+          <div class="price">$1.37</div>
+          <div id="pp-plus50"></div>
+        </div>
+        <div class="plan">
+          <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+          <div class="title">+120 archivos</div>
+          <div class="price">$2.45</div>
+          <div id="pp-plus120"></div>
+        </div>
+        <div class="plan">
+          <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+          <div class="title">+250 archivos</div>
+          <div class="price">$3.55</div>
+          <div id="pp-plus250"></div>
+        </div>
       </div>
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+120 archivos</div>
-        <div class="price">$2.45</div>
-        <div id="pp-plus120"></div>
-      </div>
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+250 archivos</div>
-        <div class="price">$3.55</div>
-        <div id="pp-plus250"></div>
-      </div>
+
+      <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
+      <script>
+        function renderBtn(selector, plan){
+          const cont = document.querySelector(selector);
+          if (!cont) return;
+
+          paypal.Buttons({
+            style: { layout:'vertical', shape:'pill', tagline:false },
+            createOrder: async function() {
+              const r = await fetch('paypal_create_order.php', {
+                method: 'POST',
+                headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+                body: JSON.stringify({ plan })
+              });
+              if (!r.ok) {
+                const tx = await r.text().catch(()=> '');
+                alert('No se pudo crear la orden ('+r.status+').\n'+tx);
+                throw new Error('createOrder failed');
+              }
+              const d = await r.json().catch(()=> ({}));
+              if (!d.id) { alert('Respuesta inválida al crear la orden.'); throw new Error('missing order id'); }
+              return d.id;
+            },
+            onApprove: async function(data) {
+              if (!data?.orderID) { alert('Falta orderID para capturar.'); return; }
+              const r = await fetch('paypal_capture.php', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
+                body: JSON.stringify({ orderID: data.orderID })
+              });
+              const d = await r.json().catch(()=> ({}));
+              if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
+              else { alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status))); }
+            },
+            onError: function(err){ console.error(err); alert('❌ Error con PayPal Buttons. Reintenta.'); }
+          }).render(selector);
+        }
+        renderBtn('#pp-plus50','plus50');
+        renderBtn('#pp-plus120','plus120');
+        renderBtn('#pp-plus250','plus250');
+      </script>
     </div>
+  <?php elseif ((int)$me['is_admin'] === 1): ?>
+    <div class="card" style="margin-top:14px">
+      <h3>Pagos automáticos (PayPal)</h3>
+      <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
+    </div>
+  <?php endif; ?>
 
-    <!-- SDK de PayPal (usa el Client ID guardado en settings) -->
-    <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
-
-    <script>
-      function renderBtn(selector, plan){
-        const cont = document.querySelector(selector);
-        if (!cont) return;
-
-        paypal.Buttons({
-          style: { layout:'vertical', shape:'pill', tagline:false },
-
-          createOrder: async function() {
-            const r = await fetch('paypal_create_order.php', {
-              method: 'POST',
-              headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
-              body: JSON.stringify({ plan }) // plus50 | plus120 | plus250
-            });
-
-            if (!r.ok) {
-              const tx = await r.text().catch(()=> '');
-              alert('No se pudo crear la orden ('+r.status+').\n'+tx);
-              throw new Error('createOrder failed');
-            }
-
-            const d = await r.json().catch(()=> ({}));
-            if (!d.id) {
-              alert('Respuesta inválida al crear la orden.');
-              throw new Error('missing order id');
-            }
-            return d.id;
-          },
-
-          onApprove: async function(data) {
-            if (!data?.orderID) {
-              alert('Falta orderID para capturar.');
-              return;
-            }
-            const r = await fetch('paypal_capture.php', {
-              method:'POST',
-              headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-              body: JSON.stringify({ orderID: data.orderID })
-            });
-
-            const d = await r.json().catch(()=> ({}));
-            if (r.ok && d.ok) {
-              alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.');
-              location.reload();
-            } else {
-              alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status)));
-            }
-          },
-
-          onError: function(err){
-            console.error(err);
-            alert('❌ Error con PayPal Buttons. Reintenta.');
-          }
-        }).render(selector);
-      }
-
-      // Render de los tres botones
-      renderBtn('#pp-plus50','plus50');
-      renderBtn('#pp-plus120','plus120');
-      renderBtn('#pp-plus250','plus250');
-    </script>
-  </div>
-<?php elseif ((int)$me['is_admin'] === 1): ?>
-  <!-- Si NO hay PayPal configurado, sólo el admin ve este aviso -->
-  <div class="card" style="margin-top:14px">
-    <h3>Pagos automáticos (PayPal)</h3>
-    <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
-  </div>
-<?php endif; ?>
-  
 </div>
+
 <script>
   // Copiar API Key
   const copyBtn=document.getElementById('copyKey');
