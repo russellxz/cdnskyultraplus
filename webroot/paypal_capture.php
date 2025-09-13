@@ -1,86 +1,89 @@
 <?php
-declare(strict_types=1);
+// paypal_capture.php
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/paypal.php';
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 
-// Convertir warnings a excepciones y NUNCA devolver 500
-set_error_handler(function($n,$s,$f,$l){ throw new Error("$s @$f:$l"); });
-set_exception_handler(function($e){
-  pp_log(['capture_php_exception'=>get_class($e),'msg'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]);
-  http_response_code(200);
-  echo json_encode(['ok'=>false,'error'=>'php_exception','msg'=>$e->getMessage()]);
-});
-
-if (empty($_SESSION['uid'])) { echo json_encode(['ok'=>false,'error'=>'auth']); exit; }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'method']); exit; }
+if (empty($_SESSION['uid'])) { http_response_code(401); echo json_encode(['error'=>'auth']); exit; }
 $uid = (int)$_SESSION['uid'];
 
-$in      = json_decode(file_get_contents('php://input'), true) ?: $_POST;
-$orderID = trim((string)($in['orderID'] ?? ''));
-$planCli = strtoupper(preg_replace('/[^A-Z0-9_]/','', $in['plan'] ?? ''));
+$raw = file_get_contents('php://input');
+$inp = json_decode($raw, true);
+$orderId = trim($inp['orderID'] ?? '');
+if ($orderId === '') { http_response_code(400); echo json_encode(['error'=>'missing_order_id']); exit; }
 
-if ($orderID==='') { echo json_encode(['ok'=>false,'error'=>'order_required']); exit; }
+$cats = plans_catalog();
 
-// PayPal requiere POST con JSON {}; nunca enviar cuerpo vacío con Content-Type: application/json
+/* 1) Leemos la orden para extraer custom_id y validar plan/usuario */
 $http=0; $err=null;
-$res = paypal_api('POST', "/v2/checkout/orders/{$orderID}/capture", (object)[], $http, $err);
+$ord = paypal_api('GET', '/v2/checkout/orders/'.$orderId, null, $http, $err);
+if ($http !== 200 || !$ord) { http_response_code(500); echo json_encode(['error'=>'get_failed','detail'=>$err,'http'=>$http]); exit; }
 
-if ($http!==201) {
-  pp_log(['capture_http_fail'=>$http,'err'=>$err,'res'=>$res]);
-  echo json_encode(['ok'=>false,'error'=>'capture_http_'.$http,'debug'=>$err,'res'=>$res]); exit;
+$pu = $ord['purchase_units'][0] ?? [];
+$custom = $pu['custom_id'] ?? '';
+if (strpos($custom, ':') === false) { http_response_code(400); echo json_encode(['error'=>'custom_id_missing']); exit; }
+list($uidFromOrder, $plan) = explode(':', $custom, 2);
+$uidFromOrder = (int)$uidFromOrder; $plan = strtoupper(trim($plan));
+
+if ($uidFromOrder !== $uid) { http_response_code(403); echo json_encode(['error'=>'user_mismatch']); exit; }
+if (!isset($cats[$plan])) { http_response_code(400); echo json_encode(['error'=>'plan_invalid']); exit; }
+
+/* 2) Capturamos. IMPORTANTE: cuerpo JSON vacío '{}' (o sin cuerpo).
+      Algunos entornos fallan con [] u otros JSON.  */
+$cap = paypal_api('POST', '/v2/checkout/orders/'.$orderId.'/capture', '{}', $http, $err);
+if ($http >= 400 || !$cap) { http_response_code(502); echo json_encode(['error'=>'capture_http','http'=>$http,'detail'=>$err]); exit; }
+
+/* 3) Revisamos estado de captura */
+$capStatus = $cap['status'] ?? '';
+$captures  = $cap['purchase_units'][0]['payments']['captures'] ?? [];
+$firstCap  = $captures[0] ?? [];
+$txnStatus = $firstCap['status'] ?? '';
+$amt       = $firstCap['amount']['value'] ?? null;
+$cur       = $firstCap['amount']['currency_code'] ?? 'USD';
+$payerMail = $cap['payer']['email_address'] ?? null;
+
+if ($capStatus !== 'COMPLETED' && $txnStatus !== 'COMPLETED') {
+  http_response_code(400);
+  echo json_encode(['error'=>'not_completed','status'=>$capStatus,'txn'=>$txnStatus]);
+  exit;
 }
 
-$status = strtoupper($res['status'] ?? '');
-$pu     = $res['purchase_units'][0] ?? [];
-$custom = (string)($pu['custom_id'] ?? '');
-
-$plan = $planCli;
-if (!$plan && $custom && strpos($custom, ':')!==false) {
-  [$uidFrom, $planFrom] = explode(':', $custom, 2);
-  $plan = strtoupper(preg_replace('/[^A-Z0-9_]/','', $planFrom));
+/* 4) Validación de importe */
+$expected = number_format($cats[$plan]['usd'], 2, '.', '');
+if ($amt !== $expected || $cur !== 'USD') {
+  http_response_code(400);
+  echo json_encode(['error'=>'amount_mismatch','got'=>$amt.$cur,'expected'=>$expected.'USD']);
+  exit;
 }
 
-if ($status!=='COMPLETED' && $status!=='APPROVED') {
-  pp_log(['invalid_state'=>$status,'order'=>$orderID,'custom'=>$custom]);
-  echo json_encode(['ok'=>false,'error'=>'invalid_state_or_plan','state'=>$status]); exit;
+/* 5) Idempotencia: si ya registramos este order_id como COMPLETED, no repetimos */
+$st = $pdo->prepare("SELECT id FROM payments WHERE provider='paypal' AND order_id=? AND status='completed'");
+$st->execute([$orderId]);
+if ($st->fetchColumn()) {
+  echo json_encode(['ok'=>1,'inc'=>0,'info'=>'duplicate']); exit;
 }
 
-$cat = plans_catalog();
-if (!$plan || !isset($cat[$plan])) {
-  pp_log(['missing_plan'=>$plan,'from_custom'=>$custom]);
-  echo json_encode(['ok'=>false,'error'=>'invalid_state_or_plan']); exit;
-}
+/* 6) Guardamos pago y sumamos cupo */
+$pdo->beginTransaction();
+try{
+  // payments (ajusta nombres de columnas si difieren)
+  $ins = $pdo->prepare("INSERT INTO payments(provider, order_id, user_id, plan_code, amount_usd, currency, status, payer_email, raw_json)
+                        VALUES('paypal',?,?,?,?,?,'completed',?,?)");
+  $ins->execute([$orderId, $uid, $plan, $expected, 'USD', $payerMail, json_encode($cap)]);
 
-try {
-  $pdo->beginTransaction();
-
-  // Registrar pago
-  $st = $pdo->prepare("INSERT INTO payments(user_id, order_id, provider, plan_code, amount_usd, currency, status, raw_json, created_at)
-                       VALUES(?,?,?,?,?,?,?, ?, CURRENT_TIMESTAMP)");
-  $st->execute([
-    $uid,
-    $orderID,
-    'paypal',
-    $plan,
-    (float)$cat[$plan]['usd'],
-    'USD',
-    'completed',
-    json_encode($res, JSON_UNESCAPED_SLASHES),
-  ]);
-
-  // Aplicar beneficio del plan
-  $inc = (int)$cat[$plan]['inc'];
-  if ($inc>0) {
-    $up = $pdo->prepare("UPDATE users SET quota_limit = quota_limit + ? WHERE id=?");
-    $up->execute([$inc,$uid]);
-  }
+  // sumar cupo
+  $inc = (int)$cats[$plan]['inc'];
+  $pdo->prepare("UPDATE users SET quota_limit = quota_limit + ? WHERE id=?")->execute([$inc, $uid]);
 
   $pdo->commit();
-  echo json_encode(['ok'=>true,'inc'=>$inc,'state'=>$status,'plan'=>$plan]); exit;
-
-} catch(Throwable $e) {
+} catch(Exception $e){
   $pdo->rollBack();
-  pp_log(['db_err'=>$e->getMessage()]);
-  echo json_encode(['ok'=>false,'error'=>'db','msg'=>$e->getMessage()]); exit;
+  paypal_log('DB error on capture '.$orderId.': '.$e->getMessage());
+  http_response_code(500);
+  echo json_encode(['error'=>'db_error']);
+  exit;
 }
+
+echo json_encode(['ok'=>1,'inc'=>$cats[$plan]['inc']]);
