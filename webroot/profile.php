@@ -258,14 +258,22 @@ function wa_link($plan){ global $me;
   </div>
 
 <?php
+  // Mostrar botones PayPal solo si hay Client ID configurado en Admin → Pagos
   $pp_cid  = setting_get('paypal_client_id','');
-  $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox|live
+  $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox | live (informativo)
 ?>
 <div class="card" style="margin-top:14px">
   <h3>Pagos automáticos (PayPal)</h3>
+
   <?php if (!$pp_cid): ?>
-    <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar estos botones.</p>
+    <p class="muted">
+      Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.
+    </p>
   <?php else: ?>
+    <p class="muted" style="margin-top:-6px;margin-bottom:8px">
+      Modo: <b><?=htmlspecialchars(strtoupper($pp_mode))?></b>
+    </p>
+
     <div class="plans">
       <div class="plan">
         <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
@@ -287,34 +295,67 @@ function wa_link($plan){ global $me;
       </div>
     </div>
 
+    <!-- SDK de PayPal -->
     <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
+
+    <!-- Render de botones (create + capture) -->
     <script>
       function renderBtn(selector, plan){
+        const cont = document.querySelector(selector);
+        if (!cont) return;
+
         paypal.Buttons({
           style: { layout:'vertical', shape:'pill', tagline:false },
-          createOrder: function() {
-            return fetch('paypal_create_order.php', {
+
+          createOrder: async function() {
+            const r = await fetch('paypal_create_order.php', {
               method: 'POST',
-              headers: { 'Content-Type':'application/json' },
+              headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
               body: JSON.stringify({ plan })
-            }).then(r=>r.json()).then(d=>d.id);
-          },
-          onApprove: function(data) {
-            return fetch('paypal_capture.php', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ orderID: data.orderID })
-            }).then(r=>r.json()).then(d=>{
-              if(d.ok){
-                alert('✅ Pago recibido. Tu límite aumentó +'+d.inc+' archivos.');
-                location.reload();
-              }else{
-                alert('❌ Error: '+(d.error||'fallo en la captura'));
-              }
             });
+
+            if (!r.ok) {
+              const tx = await r.text().catch(()=> '');
+              alert('No se pudo crear la orden ('+r.status+').\n'+tx);
+              throw new Error('createOrder failed');
+            }
+
+            const d = await r.json().catch(()=> ({}));
+            if (!d.id) {
+              alert('Respuesta inválida al crear la orden.');
+              throw new Error('missing order id');
+            }
+            return d.id;
+          },
+
+          onApprove: async function(data) {
+            if (!data?.orderID) {
+              alert('Falta orderID para capturar.');
+              return;
+            }
+            const r = await fetch('paypal_capture.php', {
+              method:'POST',
+              headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
+              body: JSON.stringify({ orderID: data.orderID })
+            });
+
+            const d = await r.json().catch(()=> ({}));
+            if (r.ok && d.ok) {
+              alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.');
+              location.reload();
+            } else {
+              alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status)));
+            }
+          },
+
+          onError: function(err){
+            console.error(err);
+            alert('❌ Error con PayPal Buttons. Reintenta.');
           }
         }).render(selector);
       }
+
+      // Renderizar cada plan
       renderBtn('#pp-plus50','plus50');
       renderBtn('#pp-plus120','plus120');
       renderBtn('#pp-plus250','plus250');
