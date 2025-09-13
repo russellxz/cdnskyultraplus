@@ -7,15 +7,16 @@ require_once __DIR__.'/paypal.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-// autenticación
+// auth
 if (empty($_SESSION['uid'])) { http_response_code(401); echo json_encode(['error'=>'auth']); exit; }
 $uid = (int)$_SESSION['uid'];
 
-// entrada
-$raw = file_get_contents('php://input');
-$in  = json_decode($raw, true) ?: $_POST;
+// input
+$raw  = file_get_contents('php://input');
+$in   = json_decode($raw, true) ?: $_POST;
 $plan = strtoupper(preg_replace('/[^A-Z0-9_]/','', (string)($in['plan'] ?? '')));
 
+// catálogo
 $cat = plans_catalog();
 if (!isset($cat[$plan])) {
   http_response_code(400);
@@ -23,7 +24,7 @@ if (!isset($cat[$plan])) {
   exit;
 }
 
-// sanity de credenciales / modo
+// credenciales / modo
 $cfg = paypal_cfg();
 if ($cfg['cid']==='' || $cfg['secret']==='') {
   http_response_code(500);
@@ -37,15 +38,14 @@ $body = [
   'purchase_units' => [[
     'amount'       => ['currency_code'=>'USD','value'=>$amount],
     'description'  => 'SkyUltraPlus '.$cat[$plan]['name'],
-    'custom_id'    => $uid.':'.$plan,   // validaremos al capturar
-  ]]],
+    'custom_id'    => $uid.':'.$plan,
+  ]],   // 👈 OJO: aquí van DOS corchetes de cierre, no tres
   'application_context' => [
-    'brand_name'   => $cfg['brand'] ?: 'SkyUltraPlus',
+    'brand_name'          => $cfg['brand'] ?: 'SkyUltraPlus',
     'shipping_preference' => 'NO_SHIPPING',
-    'user_action'  => 'PAY_NOW',
-    // pueden ser la misma para flow en modal
-    'return_url'   => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
-    'cancel_url'   => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
+    'user_action'         => 'PAY_NOW',
+    'return_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
+    'cancel_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
   ],
 ];
 
@@ -53,11 +53,10 @@ $http = 0; $err = null;
 $res  = paypal_api('POST','/v2/checkout/orders', $body, $http, $err);
 
 if ($http === 201 && !empty($res['id'])) {
-  echo json_encode(['id'=>$res['id']]); // éxito
+  echo json_encode(['id'=>$res['id']]);
   exit;
 }
 
-// si falló, devolvemos detalle útil al cliente y lo dejamos logueado en paypal.log
 http_response_code(500);
 echo json_encode([
   'error' => 'create_failed',
