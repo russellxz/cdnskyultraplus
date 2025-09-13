@@ -1,10 +1,17 @@
 <?php
+// admin_payments.php
 require_once __DIR__.'/db.php';
-require_once __DIR__.'/paypal.php';
+
+// (Opcional) ayuda temporal para diagnosticar – quítalo en producción:
+ini_set('display_errors', '1');
+error_reporting(E_ALL);
 
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
-$me  = $pdo->query("SELECT * FROM users WHERE id=$uid")->fetch();
+
+$st = $pdo->prepare("SELECT * FROM users WHERE id=? LIMIT 1");
+$st->execute([$uid]);
+$me = $st->fetch();
 if (!$me || !(int)$me['is_admin']) { http_response_code(403); exit('403'); }
 
 /* ==== POST (guardar / probar) ==== */
@@ -35,15 +42,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('invoice_prefix',   $pref);
 
     // Plan de suscripción (Deluxe)
-    $plan = trim($_POST['pp_deluxe_plan_id'] ?? '');   // P-XXXXXXXXXXX
+    $plan = trim($_POST['pp_deluxe_plan_id'] ?? '');   // P-XXXXXXXX...
     setting_set('pp_deluxe_plan_id', $plan);
 
     exit('OK');
   }
 
   if ($action === 'test') {
+    // Cargar la librería SOLO para esta acción
+    $paypalLoaded = false;
+    foreach (['paypal.php', 'paypal_client.php', 'lib/paypal.php'] as $file) {
+      $path = __DIR__.'/'.$file;
+      if (is_file($path)) { require_once $path; $paypalLoaded = true; break; }
+    }
+    if (!$paypalLoaded || !function_exists('paypal_get_token')) {
+      http_response_code(500);
+      exit('ERR: No encuentro paypal.php / paypal_client.php o falta paypal_get_token().');
+    }
+
     $err = null;
-    $tok = paypal_get_token($err); // usa paypal_mode/id/secret de settings
+    $tok = paypal_get_token($err); // usa paypal_mode/id/secret desde settings
     echo $tok ? 'OK: Token obtenido.' : ('ERR: '.$err);
     exit;
   }
