@@ -223,7 +223,7 @@ $smtp  = smtp_get();
       </div>
     </div>
   </div>
-
+  <!-- paypal -->
   <div class="card">
     <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
     <button class="btn" onclick="tgl()">Alternar</button>
@@ -234,7 +234,12 @@ $smtp  = smtp_get();
       }
     </script>
   </div>
-
+<div class="card">
+  <h3>Pagos (PayPal)</h3>
+  <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
+  <a class="btn" href="admin_payments.php">Abrir configuración</a>
+</div>
+  
   <div class="card">
     <h3>SMTP</h3>
     <form onsubmit="saveSMTP(event)">
