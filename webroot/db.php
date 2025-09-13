@@ -56,6 +56,40 @@ CREATE TABLE IF NOT EXISTS password_resets (
   expires_at INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- === Nuevas tablas para pagos e invoices ===
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  order_id    TEXT UNIQUE NOT NULL,           -- ID de la orden del proveedor (p.ej. PayPal)
+  provider    TEXT DEFAULT 'paypal',
+  plan_code   TEXT NOT NULL,                  -- plus50 | plus120 | plus250 | (más tarde deluxe_sub)
+  amount_usd  REAL NOT NULL,
+  currency    TEXT DEFAULT 'USD',
+  status      TEXT NOT NULL,                  -- created | completed | failed | refunded
+  payer_email TEXT,
+  raw_json    TEXT,                           -- respuesta completa del proveedor
+  created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  captured_at TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number     TEXT UNIQUE NOT NULL,            -- INV-YYYYMM-0001
+  user_id    INTEGER NOT NULL,
+  payment_id INTEGER,                         -- null si es factura manual
+  title      TEXT NOT NULL,                   -- concepto
+  amount_usd REAL NOT NULL,
+  currency   TEXT DEFAULT 'USD',
+  status     TEXT NOT NULL,                   -- issued | paid | refunded | void
+  pdf_path   TEXT,
+  data_json  TEXT,
+  issued_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  paid_at    TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+);
 ");
 
 /* === Migrador sencillo: añade columnas si faltan === */
@@ -115,6 +149,40 @@ function smtp_set(array $cfg): void {
   set_setting('smtp_pass', (string)$cfg['pass']);
   set_setting('smtp_from', (string)$cfg['from']);
   set_setting('smtp_name', (string)$cfg['name']);
+}
+
+/* === Pagos / Facturas: utilidades (para próximos pasos PayPal) === */
+/** Inserta o actualiza un pago por order_id (idempotente). */
+function payment_upsert(int $user_id, string $order_id, string $plan_code, float $amount_usd, string $status, array $raw = []): void {
+  global $pdo;
+  $pdo->prepare("
+    INSERT INTO payments(user_id,order_id,plan_code,amount_usd,status,raw_json)
+    VALUES(?,?,?,?,?,?)
+    ON CONFLICT(order_id) DO UPDATE SET
+      status      = excluded.status,
+      raw_json    = excluded.raw_json,
+      captured_at = CASE WHEN excluded.status='completed' THEN CURRENT_TIMESTAMP ELSE payments.captured_at END
+  ")->execute([$user_id, $order_id, $plan_code, $amount_usd, $status, json_encode($raw)]);
+}
+
+/** Genera número de factura tipo INV-YYYYMM-0001. */
+function invoice_next_number(): string {
+  $seq = (int) setting_get('invoice_seq', '0') + 1;
+  $ym  = date('Ym');
+  $num = sprintf('INV-%s-%04d', $ym, $seq);
+  setting_set('invoice_seq', (string)$seq);
+  return $num;
+}
+
+/** Crea una factura (devuelve ID). */
+function invoice_create(int $user_id, ?int $payment_id, string $title, float $amount_usd, string $currency = 'USD', string $status='issued', array $data = []): int {
+  global $pdo;
+  $number = invoice_next_number();
+  $pdo->prepare("
+    INSERT INTO invoices(number,user_id,payment_id,title,amount_usd,currency,status,data_json)
+    VALUES(?,?,?,?,?,?,?,?)
+  ")->execute([$number,$user_id,$payment_id,$title,$amount_usd,$currency,$status,json_encode($data)]);
+  return (int)$pdo->lastInsertId();
 }
 
 /* === Flags iniciales === */
