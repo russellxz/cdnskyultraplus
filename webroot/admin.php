@@ -7,7 +7,83 @@ $uid = (int)$_SESSION['uid'];
 $me  = $pdo->query("SELECT * FROM users WHERE id=$uid")->fetch();
 if (!$me || !$me['is_admin']) { http_response_code(403); exit('403'); }
 
-/* ====== ACTIONS (POST) ====== */
+/* ----------------------- Helpers comunes ----------------------- */
+function json_out(array $a){ header('Content-Type: application/json; charset=utf-8'); echo json_encode($a, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }
+function bytes_fmt(int|float $b): string {
+  $u=['B','KB','MB','GB','TB']; $i=0; while($b>=1024 && $i<count($u)-1){ $b/=1024; $i++; }
+  return number_format($b, $b>=10?0:1).' '.$u[$i];
+}
+
+/* --------- Métricas del servidor (para el monitor en tiempo real) --------- */
+function metric_cpu_percent(float $interval=0.2): float {
+  $line = @file('/proc/stat')[0] ?? '';
+  if (strpos($line,'cpu')!==0) return -1;
+  $p = preg_split('/\s+/', trim($line)); // cpu user nice system idle iowait irq softirq steal guest guest_nice
+  $idle1  = (int)($p[4] ?? 0);
+  $total1 = 0; for ($i=1;$i<count($p);$i++) $total1 += (int)$p[$i];
+
+  usleep((int)($interval*1_000_000));
+
+  $line = @file('/proc/stat')[0] ?? '';
+  $p = preg_split('/\s+/', trim($line));
+  $idle2  = (int)($p[4] ?? 0);
+  $total2 = 0; for ($i=1;$i<count($p);$i++) $total2 += (int)$p[$i];
+
+  $diffTotal = max(1, $total2 - $total1);
+  $diffIdle  = max(0, $idle2  - $idle1);
+  $usage = (1 - ($diffIdle / $diffTotal)) * 100;
+  return max(0, min(100, round($usage, 1)));
+}
+function metric_mem(): array {
+  $mem = @file('/proc/meminfo') ?: [];
+  $tot=$avail=0;
+  foreach($mem as $l){
+    if (str_starts_with($l,'MemTotal:'))     $tot   = (int)filter_var($l,FILTER_SANITIZE_NUMBER_INT)*1024;
+    if (str_starts_with($l,'MemAvailable:')) $avail = (int)filter_var($l,FILTER_SANITIZE_NUMBER_INT)*1024;
+  }
+  if ($tot<=0) return ['total'=>0,'used'=>0,'free'=>0,'percent'=>0];
+  $used = max(0, $tot - $avail);
+  return ['total'=>$tot,'used'=>$used,'free'=>$avail,'percent'=>round($used/$tot*100,1)];
+}
+function metric_disk(string $path): array {
+  $path = realpath($path) ?: $path;
+  $tot = @disk_total_space($path) ?: 0;
+  $free = @disk_free_space($path) ?: 0;
+  $used = max(0, $tot - $free);
+  $pct  = $tot>0 ? round($used/$tot*100,1) : 0;
+  return ['total'=>$tot,'used'=>$used,'free'=>$free,'percent'=>$pct,'path'=>$path];
+}
+function metric_uptime(): string {
+  $u = @file_get_contents('/proc/uptime');
+  if (!$u) return '';
+  $secs = (int)floatval(explode(' ',$u)[0]);
+  $d=floor($secs/86400); $h=floor(($secs%86400)/3600); $m=floor(($secs%3600)/60);
+  $out=[]; if($d) $out[]="$d d"; if($h) $out[]="$h h"; if($m || !$d && !$h) $out[]="$m m";
+  return implode(' ', $out);
+}
+/* Endpoint GET ?action=metrics */
+if (isset($_GET['action']) && $_GET['action']==='metrics') {
+  // Para el disco medimos donde se guardan los uploads
+  $uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : (__DIR__.'/uploads');
+  $cpu = metric_cpu_percent(0.2);
+  $mem = metric_mem();
+  $dsk = metric_disk($uploadsBase);
+  $load = function_exists('sys_getloadavg') ? sys_getloadavg() : [0,0,0];
+  json_out([
+    'ok'=>true,
+    'cpu_pct'=>$cpu,
+    'mem'=>[
+      'total'=>$mem['total'],'used'=>$mem['used'],'free'=>$mem['free'],'pct'=>$mem['percent'],
+    ],
+    'disk'=>[
+      'path'=>$dsk['path'],'total'=>$dsk['total'],'used'=>$dsk['used'],'free'=>$dsk['free'],'pct'=>$dsk['percent'],
+    ],
+    'load'=>['1m'=>round($load[0]??0,2),'5m'=>round($load[1]??0,2),'15m'=>round($load[2]??0,2)],
+    'uptime'=>metric_uptime(),
+  ]);
+}
+
+/* ======================= ACTIONS (POST) ======================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
 
@@ -29,11 +105,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'user_update') {
     $id = (int)($_POST['id'] ?? 0);
-    // proteger root admin por email
     $email = $pdo->query("SELECT email FROM users WHERE id=$id")->fetchColumn();
     if ($email === ROOT_ADMIN_EMAIL) exit('ROOT protegido');
 
-    $api   = trim($_POST['api_key'] ?? '');           // permite API keys cortas
+    $api   = trim($_POST['api_key'] ?? '');
     $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
     $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
     $quota = (int)($_POST['quota_limit'] ?? 50);
@@ -49,12 +124,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = $pdo->query("SELECT email FROM users WHERE id=$id")->fetchColumn();
     if ($email === ROOT_ADMIN_EMAIL) exit('ROOT protegido');
 
-    // Borrar físicamente los archivos usando la tabla (más seguro)
     $st = $pdo->prepare("SELECT path FROM files WHERE user_id=?");
     $st->execute([$id]);
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $p) {
       if ($p && is_file($p)) @unlink($p);
-      // intenta limpiar directorio padre si queda vacío
       $dir = dirname($p);
       if (is_dir($dir)) @rmdir($dir);
     }
@@ -80,12 +153,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   exit;
 }
 
-/* ====== DATA ====== */
+/* ======================= DATA ======================= */
 $ipon = setting_get('ip_block_enabled','1') === '1';
 
 $q = trim($_GET['q'] ?? '');
 if ($q !== '') {
-  // NADA de full_name: usamos first_name/last_name
   $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
           FROM users
           WHERE email LIKE :q
@@ -116,10 +188,41 @@ $smtp  = smtp_get();
   table{width:100%;border-collapse:collapse} td,th{border-bottom:1px solid #273042;padding:8px}
   a{color:#93c5fd}
   label.small{font-size:12px;color:#94a3b8;margin-right:6px}
+  /* Monitor */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .kpi{background:#0f172a;border:1px solid #273042;border-radius:12px;padding:10px}
+  .kpi h4{margin:2px 0 8px;font-size:14px;color:#93c5fd}
+  canvas.spark{width:100%;height:120px;background:#0b1222;border-radius:8px}
+  .bar{height:16px;background:#0b1222;border-radius:999px;overflow:hidden;border:1px solid #273042}
+  .fill{height:100%;background:linear-gradient(90deg,#22d3ee,#0ea5e9)}
+  .muted{color:#9fb0c9;font-size:13px}
 </style>
 </head>
 <body><div class="wrap">
   <h2>Panel Admin</h2>
+
+  <!-- MONITOREO EN TIEMPO REAL -->
+  <div class="card">
+    <h3>Monitoreo del servidor</h3>
+    <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
+    <div class="grid3" style="margin-top:10px">
+      <div class="kpi">
+        <h4>CPU</h4>
+        <canvas id="cpuChart" class="spark" width="400" height="120"></canvas>
+        <div class="muted">Uso: <b id="cpuTxt">--%</b></div>
+      </div>
+      <div class="kpi">
+        <h4>Memoria</h4>
+        <canvas id="memChart" class="spark" width="400" height="120"></canvas>
+        <div class="muted">Uso: <b id="memTxt">--%</b> · <span id="memDetail"></span></div>
+      </div>
+      <div class="kpi">
+        <h4>Disco (uploads)</h4>
+        <div class="bar"><div id="diskFill" class="fill" style="width:0%"></div></div>
+        <div class="muted" style="margin-top:6px">Uso: <b id="diskTxt">--%</b> · <span id="diskDetail"></span></div>
+      </div>
+    </div>
+  </div>
 
   <div class="card">
     <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
@@ -227,4 +330,67 @@ $smtp  = smtp_get();
   </div>
 
   <p><a href="profile.php">Volver</a></p>
-</div></body></html>
+</div>
+
+<script>
+/* ====== Monitor en tiempo real (CPU/RAM/Disco) ====== */
+const cpuC = document.getElementById('cpuChart').getContext('2d');
+const memC = document.getElementById('memChart').getContext('2d');
+const cpuArr = Array(60).fill(0);
+const memArr = Array(60).fill(0);
+
+function drawSpark(ctx, arr){
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
+  const max = 100, step = w/(arr.length-1);
+  ctx.beginPath();
+  ctx.moveTo(0, h - (arr[0]/max)*h);
+  for(let i=1;i<arr.length;i++){
+    const x = i*step, y = h - (arr[i]/max)*h;
+    ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+function push(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
+
+async function poll(){
+  try{
+    const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
+    const j = await r.json();
+
+    // CPU
+    push(cpuArr, Number(j.cpu_pct||0));
+    drawSpark(cpuC, cpuArr);
+    document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
+
+    // MEM
+    const mp = Number(j.mem?.pct||0);
+    push(memArr, mp);
+    drawSpark(memC, memArr);
+    document.getElementById('memTxt').textContent = mp+'%';
+    document.getElementById('memDetail').textContent =
+      (fmtBytes(j.mem?.used||0))+' / '+(fmtBytes(j.mem?.total||0));
+
+    // DISK
+    const dp = Number(j.disk?.pct||0);
+    document.getElementById('diskFill').style.width = dp+'%';
+    document.getElementById('diskTxt').textContent = dp+'%';
+    document.getElementById('diskDetail').textContent =
+      (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
+
+    // Uptime / load
+    document.getElementById('metaUptime').textContent =
+      `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
+  }catch(e){}
+  setTimeout(poll, 2000);
+}
+function fmtBytes(b){
+  const u=['B','KB','MB','GB','TB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; }
+  return (b>=10?Math.round(b):Math.round(b*10)/10)+' '+u[i];
+}
+poll();
+</script>
+</body>
+</html>
