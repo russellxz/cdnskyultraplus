@@ -18,9 +18,9 @@ const SIZE_LIMIT_DELUXE_MB = 100;  // cuenta deluxe
 // SMTP por defecto (pueden sobreescribirse desde Admin)
 const SMTP_HOST = 'smtp.hostinger.com';
 const SMTP_PORT = 587;
-const SMTP_USER = 'ok@ejemplo.com';
-const SMTP_PASS = 'aaa123456';
-const SMTP_FROM = 'ok@ejemplo.com';
+const SMTP_USER = 'ventas@skyultraplus.com';
+const SMTP_PASS = 'Flowpty1998@';
+const SMTP_FROM = 'ventas@skyultraplus.com';
 const SMTP_FROM_NAME = 'Skyultraplus';
 
 // Alias para mail.php
