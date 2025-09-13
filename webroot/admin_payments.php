@@ -5,55 +5,59 @@ require_once __DIR__.'/paypal.php';
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 $me  = $pdo->query("SELECT * FROM users WHERE id=$uid")->fetch();
-if (!$me || !$me['is_admin']) { http_response_code(403); exit('403'); }
+if (!$me || !(int)$me['is_admin']) { http_response_code(403); exit('403'); }
 
-// POST actions (AJAX)
+/* ==== POST (guardar / probar) ==== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
 
   if ($action === 'save') {
-    // Guardar settings; si secret viene vacío, mantenemos el actual
-    $mode  = ($_POST['pp_mode'] ?? 'sandbox');
-    $mode  = ($mode === 'live') ? 'live' : 'sandbox';
-    setting_set('pp_mode', $mode);
+    // Modo
+    $mode = ($_POST['mode'] ?? 'sandbox');
+    $mode = ($mode === 'live') ? 'live' : 'sandbox';
+    setting_set('paypal_mode', $mode);
 
-    $cid   = trim($_POST['pp_client_id'] ?? '');
-    $csec  = trim($_POST['pp_client_secret'] ?? '');
-    $whid  = trim($_POST['pp_webhook_id'] ?? '');
-    $bizn  = trim($_POST['biz_name'] ?? '');
-    $bize  = trim($_POST['biz_email'] ?? '');
-    $pref  = trim($_POST['invoice_prefix'] ?? '');
+    // Credenciales
+    $cid  = trim($_POST['client_id'] ?? '');
+    $csec = trim($_POST['client_secret'] ?? ''); // si viene vacío NO se sobreescribe
+    $whid = trim($_POST['webhook_id'] ?? '');
 
-    if ($cid !== '')  setting_set('pp_client_id', $cid);
-    if ($csec !== '') setting_set('pp_client_secret', $csec); // solo si lo envían
-    setting_set('pp_webhook_id',   $whid);
-    setting_set('biz_name',        $bizn);
-    setting_set('biz_email',       $bize);
-    setting_set('invoice_prefix',  $pref);
+    if ($cid !== '')  setting_set('paypal_client_id', $cid);
+    if ($csec !== '') setting_set('paypal_client_secret', $csec);
+    setting_set('paypal_webhook_id', $whid);
+
+    // Datos de factura
+    $bizn  = trim($_POST['biz_name']   ?? '');
+    $bizm  = trim($_POST['biz_mail']   ?? '');
+    $pref  = trim($_POST['inv_prefix'] ?? 'INV-');
+    setting_set('invoice_business', $bizn);
+    setting_set('invoice_email',    $bizm);
+    setting_set('invoice_prefix',   $pref);
 
     exit('OK');
   }
 
   if ($action === 'test') {
     $err = null;
-    $tok = paypal_get_token($err);
-    if ($tok) exit("OK: Token obtenido.");
-    exit("ERR: $err");
+    $tok = paypal_get_token($err); // usa paypal_mode/id/secret de settings
+    echo $tok ? 'OK: Token obtenido.' : ('ERR: '.$err);
+    exit;
   }
 
   exit;
 }
 
-// Valores actuales para el formulario
-$cfg = paypal_cfg();
-$pp_mode    = $cfg['mode'];
-$pp_client  = setting_get('pp_client_id','');
-$pp_secret  = setting_get('pp_client_secret',''); // NO lo mostraremos
-$pp_webhook = setting_get('pp_webhook_id','');
-$biz_name   = setting_get('biz_name','SkyUltraPlus');
-$biz_email  = setting_get('biz_email','soporte@tu-dominio.com');
+/* ==== Valores actuales ==== */
+$pp_mode    = setting_get('paypal_mode','sandbox');
+$pp_client  = setting_get('paypal_client_id','');
+$pp_webhook = setting_get('paypal_webhook_id','');
+
+$biz_name   = setting_get('invoice_business','SkyUltraPlus');
+$biz_email  = setting_get('invoice_email','soporte@tu-dominio.com');
 $inv_prefix = setting_get('invoice_prefix','INV-');
-$webhook_url = (defined('BASE_URL') ? BASE_URL : '') . '/paypal_webhook.php';
+
+$host = $_SERVER['HTTP_HOST'] ?? '';
+$webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
 ?>
 <!doctype html>
 <html lang="es">
@@ -85,23 +89,23 @@ $webhook_url = (defined('BASE_URL') ? BASE_URL : '') . '/paypal_webhook.php';
       <div class="grid grid-2">
         <div>
           <label class="small">Modo</label>
-          <select class="input" name="pp_mode">
+          <select class="input" name="mode">
             <option value="sandbox" <?=$pp_mode==='sandbox'?'selected':''?>>Sandbox (pruebas)</option>
             <option value="live"    <?=$pp_mode==='live'   ?'selected':''?>>Live (producción)</option>
           </select>
         </div>
         <div>
           <label class="small">Webhook ID (opcional)</label>
-          <input class="input" name="pp_webhook_id" value="<?=htmlspecialchars($pp_webhook)?>" placeholder="ej: 8A12345678901234567890ABCD">
+          <input class="input" name="webhook_id" value="<?=htmlspecialchars($pp_webhook)?>" placeholder="8A1234567890ABCD…">
         </div>
 
         <div style="grid-column:1 / -1">
           <label class="small">Client ID</label>
-          <input class="input" name="pp_client_id" value="<?=htmlspecialchars($pp_client)?>" placeholder="Copiar de tu App PayPal">
+          <input class="input" name="client_id" value="<?=htmlspecialchars($pp_client)?>" placeholder="Copiar de tu App PayPal">
         </div>
         <div style="grid-column:1 / -1">
           <label class="small">Client Secret</label>
-          <input class="input" name="pp_client_secret" value="" placeholder="Déjalo vacío para mantener el actual">
+          <input class="input" name="client_secret" value="" placeholder="Déjalo vacío para mantener el actual">
         </div>
       </div>
 
@@ -113,11 +117,11 @@ $webhook_url = (defined('BASE_URL') ? BASE_URL : '') . '/paypal_webhook.php';
         </div>
         <div>
           <label class="small">Email de negocio</label>
-          <input class="input" name="biz_email" value="<?=htmlspecialchars($biz_email)?>" placeholder="billing@tu-dominio.com">
+          <input class="input" name="biz_mail" value="<?=htmlspecialchars($biz_email)?>" placeholder="billing@tu-dominio.com">
         </div>
         <div>
           <label class="small">Prefijo de factura</label>
-          <input class="input" name="invoice_prefix" value="<?=htmlspecialchars($inv_prefix)?>" placeholder="INV-">
+          <input class="input" name="inv_prefix" value="<?=htmlspecialchars($inv_prefix)?>" placeholder="INV-">
         </div>
       </div>
 
@@ -126,6 +130,7 @@ $webhook_url = (defined('BASE_URL') ? BASE_URL : '') . '/paypal_webhook.php';
         <button class="btn" type="button" onclick="testCfg()">Probar credenciales</button>
       </div>
     </form>
+
     <p class="muted" style="margin-top:10px">
       Webhook recomendado: <code><?=htmlspecialchars($webhook_url)?></code><br>
       Eventos: <code>PAYMENT.CAPTURE.COMPLETED</code> y <code>CHECKOUT.ORDER.APPROVED</code>.
@@ -142,7 +147,6 @@ async function saveCfg(e){
   const r = await fetch('admin_payments.php', {method:'POST', body:fd});
   alert(await r.text());
 }
-
 async function testCfg(){
   const fd = new FormData(); fd.append('action','test');
   const r = await fetch('admin_payments.php', {method:'POST', body:fd});
