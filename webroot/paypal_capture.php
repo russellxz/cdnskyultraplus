@@ -5,8 +5,8 @@ require_once __DIR__.'/paypal.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-// ——— endurecer
-set_error_handler(function($no,$str,$file,$line){ throw new Error("$str @$file:$line"); });
+// Convertir warnings a excepciones y NUNCA devolver 500
+set_error_handler(function($n,$s,$f,$l){ throw new Error("$s @$f:$l"); });
 set_exception_handler(function($e){
   pp_log(['capture_php_exception'=>get_class($e),'msg'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]);
   http_response_code(200);
@@ -22,8 +22,9 @@ $planCli = strtoupper(preg_replace('/[^A-Z0-9_]/','', $in['plan'] ?? ''));
 
 if ($orderID==='') { echo json_encode(['ok'=>false,'error'=>'order_required']); exit; }
 
+// PayPal requiere POST con JSON {}; nunca enviar cuerpo vacío con Content-Type: application/json
 $http=0; $err=null;
-$res = paypal_api('POST', "/v2/checkout/orders/{$orderID}/capture", new stdClass(), $http, $err);
+$res = paypal_api('POST', "/v2/checkout/orders/{$orderID}/capture", (object)[], $http, $err);
 
 if ($http!==201) {
   pp_log(['capture_http_fail'=>$http,'err'=>$err,'res'=>$res]);
@@ -33,7 +34,8 @@ if ($http!==201) {
 $status = strtoupper($res['status'] ?? '');
 $pu     = $res['purchase_units'][0] ?? [];
 $custom = (string)($pu['custom_id'] ?? '');
-$plan   = $planCli;
+
+$plan = $planCli;
 if (!$plan && $custom && strpos($custom, ':')!==false) {
   [$uidFrom, $planFrom] = explode(':', $custom, 2);
   $plan = strtoupper(preg_replace('/[^A-Z0-9_]/','', $planFrom));
@@ -53,6 +55,7 @@ if (!$plan || !isset($cat[$plan])) {
 try {
   $pdo->beginTransaction();
 
+  // Registrar pago
   $st = $pdo->prepare("INSERT INTO payments(user_id, order_id, provider, plan_code, amount_usd, currency, status, raw_json, created_at)
                        VALUES(?,?,?,?,?,?,?, ?, CURRENT_TIMESTAMP)");
   $st->execute([
@@ -66,6 +69,7 @@ try {
     json_encode($res, JSON_UNESCAPED_SLASHES),
   ]);
 
+  // Aplicar beneficio del plan
   $inc = (int)$cat[$plan]['inc'];
   if ($inc>0) {
     $up = $pdo->prepare("UPDATE users SET quota_limit = quota_limit + ? WHERE id=?");
