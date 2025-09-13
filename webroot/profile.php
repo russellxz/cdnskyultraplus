@@ -1,7 +1,5 @@
 <?php
 require_once __DIR__.'/db.php';
-require_once __DIR__.'/paypal.php'; // para setting_any()
-
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
@@ -94,7 +92,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
 
     <?php if((int)$me['is_deluxe']!==1): ?>
       <p class="muted" style="margin:10px 0 0">
-        Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo (<?= (int)$me['is_deluxe']===1?'activo':'$2.50/mes' ?>).
+        Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo <b>(pago único $5)</b>.
       </p>
     <?php endif; ?>
 
@@ -135,7 +133,6 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
         <script>
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
-          // Upsell sin WhatsApp: ancla al bloque de pagos
           const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\\"#payplans\\">Mejorar a Deluxe</a>"' ?>;
 
           const up    = document.getElementById('up');
@@ -209,12 +206,12 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
 
   <?php
     // --- PayPal: mostrar botones sólo si está configurado ---
-    $pp_cid  = setting_any('pp_client_id','');   // admite pp_* o paypal_*
+    $pp_cid  = setting_get('paypal_client_id','');   // Admin → Pagos
   ?>
 
   <?php if ($pp_cid): ?>
     <div id="payplans" class="card" style="margin-top:14px">
-      <h3>Pagos automáticos (PayPal)</h3>
+      <h3>Pagos (PayPal)</h3>
       <div class="plans">
         <div class="plan">
           <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
@@ -234,9 +231,18 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
           <div class="price">$3.55</div>
           <div id="pp-plus250"></div>
         </div>
+        <div class="plan">
+          <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+          <div class="title">Plan Deluxe</div>
+          <div class="price">$5.00 (pago único)</div>
+          <?php if((int)$me['is_deluxe']===1): ?>
+            <div class="muted">Ya eres Deluxe 💎</div>
+          <?php else: ?>
+            <div id="pp-deluxe"></div>
+          <?php endif; ?>
+        </div>
       </div>
 
-      <!-- SDK con debug activado mientras pruebas -->
       <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture&debug=true"></script>
       <script>
         function waitForPayPal(ms=8000){
@@ -263,7 +269,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 const r = await fetch('paypal_create_order.php', {
                   method: 'POST',
                   headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ plan }) // PLUS50 | PLUS120 | PLUS250
+                  body: JSON.stringify({ plan }) // PLUS50 | PLUS120 | PLUS250 | DELUXE
                 });
                 if (!r.ok) {
                   const tx = await r.text().catch(()=> '');
@@ -280,11 +286,17 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 const r = await fetch('paypal_capture.php', {
                   method:'POST',
                   headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ orderID: data.orderID }) // el backend extrae el plan del custom_id
+                  body: JSON.stringify({ orderID: data.orderID })
                 });
                 const d = await r.json().catch(()=> ({}));
-                if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
-                else { alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status))); }
+                if (r.ok && d.ok) {
+                  let msg = '✅ Pago recibido.';
+                  if (d.deluxe) msg += ' Plan Deluxe activado.';
+                  else msg += ' Tu límite aumentó +'+(d.inc||0)+' archivos.';
+                  alert(msg); location.reload();
+                } else {
+                  alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status)));
+                }
               },
 
               onError: function(err){
@@ -298,16 +310,16 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
             alert('❌ No se pudo inicializar PayPal: '+(e.message||e));
           }
         }
-        // Enviar códigos del plan en MAYÚSCULAS
         renderBtn('#pp-plus50','PLUS50');
         renderBtn('#pp-plus120','PLUS120');
         renderBtn('#pp-plus250','PLUS250');
+        <?php if((int)$me['is_deluxe']!==1): ?>renderBtn('#pp-deluxe','DELUXE');<?php endif; ?>
       </script>
     </div>
   <?php elseif ((int)$me['is_admin'] === 1): ?>
     <div class="card" style="margin-top:14px">
-      <h3>Pagos automáticos (PayPal)</h3>
-      <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
+      <h3>Pagos (PayPal)</h3>
+      <p class="muted">Configura PayPal en <a class="btn btn-sm ghost" href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
     </div>
   <?php endif; ?>
 
