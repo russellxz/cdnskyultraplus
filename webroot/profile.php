@@ -1,33 +1,32 @@
 <?php
 require_once __DIR__.'/db.php';
-require_once __DIR__.'/paypal.php'; // para setting_any()
-
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
-$st=$pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,api_key FROM users WHERE id=?");
+$st=$pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,api_key,pp_sub_id FROM users WHERE id=?");
 $st->execute([$uid]); $me=$st->fetch();
 
 $c=$pdo->prepare("SELECT COUNT(*) c FROM files WHERE user_id=?"); $c->execute([$uid]);
 $used=(int)$c->fetch()['c']; $remain=max(0,(int)$me['quota_limit']-$used);
 
-// Índice (por si no existe) para que el buscador sea rápido
+// Índice por si falta
 $pdo->exec("CREATE INDEX IF NOT EXISTS files_userid_name ON files(user_id, name)");
 
 // Límite por plan
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
+
+// --- PayPal settings ---
+$pp_cid   = setting_get('paypal_client_id','');         // Client ID
+$pp_plan  = setting_get('pp_deluxe_plan_id','');        // P-XXXX (Plan Deluxe)
 ?>
 <!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel — CDN SkyUltraPlus</title>
 <style>
-  body{
-    margin:0;font:15px/1.6 system-ui;color:#eaf2ff;
-    background:
-      radial-gradient(800px 500px at 100% -10%, rgba(219,39,119,.25), transparent 60%),
-      radial-gradient(800px 500px at 0% 110%, rgba(37,99,235,.25), transparent 60%),
-      linear-gradient(160deg,#0a0b12 10%, #120e1a 40%, #051436 100%);
-  }
+  body{margin:0;font:15px/1.6 system-ui;color:#eaf2ff;background:
+    radial-gradient(800px 500px at 100% -10%, rgba(219,39,119,.25), transparent 60%),
+    radial-gradient(800px 500px at 0% 110%, rgba(37,99,235,.25), transparent 60%),
+    linear-gradient(160deg,#0a0b12 10%, #120e1a 40%, #051436 100%);}
   .wrap{max-width:1100px;margin:0 auto;padding:20px}
   .card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:18px}
   .btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(90deg,#0ea5e9,#22d3ee);color:#051425;border:none;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none}
@@ -37,11 +36,8 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   a{color:#93c5fd}
   .hero{text-align:center;margin-top:6px;margin-bottom:10px}
   .hero .logo{width:120px;display:block;margin:10px auto 6px;filter:drop-shadow(0 12px 40px rgba(219,39,119,.35))}
-  .hero h1{
-    margin:6px 0 0;font-size:28px;line-height:1.2;
-    background:linear-gradient(90deg,#60a5fa,#22d3ee,#f472b6);
-    -webkit-background-clip:text;background-clip:text;color:transparent;font-weight:900;
-  }
+  .hero h1{margin:6px 0 0;font-size:28px;line-height:1.2;background:linear-gradient(90deg,#60a5fa,#22d3ee,#f472b6);
+    -webkit-background-clip:text;background-clip:text;color:transparent;font-weight:900;}
   .row{display:grid;gap:14px}
   @media(min-width:860px){ .row2{grid-template-columns:1fr} }
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);font-weight:800}
@@ -90,11 +86,12 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
       <button class="pill grad" id="copyKey">Copiar API Key</button>
       <span class="pill grad">Disponibles: <b><?=$remain?></b></span>
       <span class="pill">Límite por archivo: <b><?=$maxMB?>MB</b></span>
+      <?php if($me['pp_sub_id']): ?><span class="pill">Sub ID: <code><?=htmlspecialchars($me['pp_sub_id'])?></code></span><?php endif; ?>
     </div>
 
     <?php if((int)$me['is_deluxe']!==1): ?>
       <p class="muted" style="margin:10px 0 0">
-        Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo (<?= (int)$me['is_deluxe']===1?'activo':'$2.50/mes' ?>).
+        Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo ($2.50/mes).
       </p>
     <?php endif; ?>
 
@@ -135,7 +132,6 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
         <script>
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
-          // Upsell sin WhatsApp: ancla al bloque de pagos
           const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\\"#payplans\\">Mejorar a Deluxe</a>"' ?>;
 
           const up    = document.getElementById('up');
@@ -207,12 +203,8 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
     </div>
   </div>
 
-  <?php
-    // --- PayPal: mostrar botones sólo si está configurado ---
-    $pp_cid  = setting_any('pp_client_id','');   // admite pp_* o paypal_*
-  ?>
-
   <?php if ($pp_cid): ?>
+    <!-- PAGOS: TOP-UPS (órdenes únicas) -->
     <div id="payplans" class="card" style="margin-top:14px">
       <h3>Pagos automáticos (PayPal)</h3>
       <div class="plans">
@@ -234,10 +226,23 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
           <div class="price">$3.55</div>
           <div id="pp-plus250"></div>
         </div>
+
+        <!-- DELUXE (suscripción mensual) -->
+        <div class="plan">
+          <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+          <div class="title">Plan Deluxe</div>
+          <div class="price">$2.50 / mes</div>
+          <div class="muted">Sube hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo.</div>
+          <?php if ($pp_plan): ?>
+            <div id="pp-deluxe"></div>
+          <?php else: ?>
+            <div class="muted">Configura el <b>Plan ID</b> en Admin → Pagos para mostrar el botón.</div>
+          <?php endif; ?>
+        </div>
       </div>
 
-      <!-- SDK con debug activado mientras pruebas -->
-      <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture&debug=true"></script>
+      <!-- SDK para ÓRDENES (top-ups) -->
+      <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
       <script>
         function waitForPayPal(ms=8000){
           return new Promise((res, rej)=>{
@@ -249,16 +254,13 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
             })();
           });
         }
-
         async function renderBtn(selector, plan){
           const cont = document.querySelector(selector);
           if (!cont) return;
           try{
             await waitForPayPal();
-
             paypal.Buttons({
               style: { layout:'vertical', shape:'pill', tagline:false },
-
               createOrder: async function() {
                 const r = await fetch('paypal_create_order.php', {
                   method: 'POST',
@@ -274,19 +276,17 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 if (!d.id) { alert('Respuesta inválida al crear la orden.'); throw new Error('missing order id'); }
                 return d.id;
               },
-
               onApprove: async function(data) {
                 if (!data?.orderID) { alert('Falta orderID para capturar.'); return; }
                 const r = await fetch('paypal_capture.php', {
                   method:'POST',
                   headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ orderID: data.orderID }) // el backend extrae el plan del custom_id
+                  body: JSON.stringify({ orderID: data.orderID, plan })
                 });
                 const d = await r.json().catch(()=> ({}));
                 if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
                 else { alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status))); }
               },
-
               onError: function(err){
                 console.error('PayPal onError:', err);
                 const msg = (err && (err.message || (err.toString && err.toString()))) || 'desconocido';
@@ -298,11 +298,62 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
             alert('❌ No se pudo inicializar PayPal: '+(e.message||e));
           }
         }
-        // Enviar códigos del plan en MAYÚSCULAS
         renderBtn('#pp-plus50','PLUS50');
         renderBtn('#pp-plus120','PLUS120');
         renderBtn('#pp-plus250','PLUS250');
       </script>
+
+      <?php if ($pp_plan): ?>
+      <!-- SDK para SUSCRIPCIONES (namespace separado) -->
+      <script
+        src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&vault=true&intent=subscription"
+        data-namespace="paypalSub"></script>
+      <script>
+        // Botón de suscripción Deluxe
+        (async function(){
+          function wait(ns, ms=8000){
+            return new Promise((res, rej)=>{
+              const t0 = Date.now();
+              (function tick(){
+                if (window[ns] && typeof window[ns].Buttons === 'function') return res();
+                if (Date.now() - t0 > ms) return rej(new Error('SDK Sub no cargó'));
+                setTimeout(tick, 120);
+              })();
+            });
+          }
+          try{
+            await wait('paypalSub');
+            paypalSub.Buttons({
+              style:{ layout:'vertical', shape:'pill', tagline:false },
+              createSubscription: function(data, actions){
+                return actions.subscription.create({
+                  plan_id: "<?=htmlspecialchars($pp_plan)?>",
+                  custom_id: "DELUXE:<?=$uid?>"
+                });
+              },
+              onApprove: async function(data){
+                try{
+                  const r = await fetch('paypal_subscribe.php', {
+                    method:'POST',
+                    headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
+                    body: JSON.stringify({ subscriptionID: data.subscriptionID })
+                  });
+                  const d = await r.json().catch(()=> ({}));
+                  if (r.ok && d.ok) { alert('✅ Deluxe activado. ¡Listo!'); location.reload(); }
+                  else { alert('❌ Error al activar Deluxe: '+(d.error || ('HTTP '+r.status))); }
+                }catch(e){ alert('❌ Error de red al activar Deluxe'); }
+              },
+              onError: function(err){
+                console.error('Sub onError:', err);
+                alert('❌ Error con PayPal Subscriptions.');
+              }
+            }).render('#pp-deluxe');
+          }catch(e){
+            console.error('No se pudo iniciar el SDK de Sub:', e);
+          }
+        })();
+      </script>
+      <?php endif; ?>
     </div>
   <?php elseif ((int)$me['is_admin'] === 1): ?>
     <div class="card" style="margin-top:14px">
@@ -321,14 +372,12 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
     try{ await navigator.clipboard.writeText(t); copyBtn.textContent='¡Copiada!'; setTimeout(()=>copyBtn.textContent='Copiar API Key',1500);}catch(e){}
   });
 
-  // ---------- Buscador rápido ----------
+  // Buscador rápido
   const qInput = document.getElementById('q');
   const qBtn   = document.getElementById('qBtn');
   const qRes   = document.getElementById('qRes');
   const qHint  = document.getElementById('qHint');
-
   function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-
   let t=null, ctl=null;
   async function runSearch(){
     const q = qInput.value.trim();
@@ -359,7 +408,6 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   function deb(){ clearTimeout(t); t=setTimeout(runSearch, 280); }
   qInput?.addEventListener('input', deb);
   qBtn?.addEventListener('click', runSearch);
-
   qRes.addEventListener('click', async (e)=>{
     const b=e.target.closest('button[data-url]'); if(!b) return;
     try{ await navigator.clipboard.writeText(b.dataset.url);
