@@ -248,7 +248,6 @@ function wa_link($plan){ global $me;
   <?php
     // --- PayPal: mostrar botones sólo si está configurado ---
     $pp_cid  = setting_get('paypal_client_id','');   // viene de Admin → Pagos
-    $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox | live (no lo usamos aquí, pero queda por si acaso)
   ?>
 
   <?php if ($pp_cid): ?>
@@ -275,42 +274,67 @@ function wa_link($plan){ global $me;
         </div>
       </div>
 
-      <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
+      <!-- SDK con debug activado -->
+      <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture&debug=true"></script>
       <script>
-        function renderBtn(selector, plan){
+        function waitForPayPal(ms=8000){
+          return new Promise((res, rej)=>{
+            const t0 = Date.now();
+            (function tick(){
+              if (window.paypal && typeof paypal.Buttons === 'function') return res();
+              if (Date.now() - t0 > ms) return rej(new Error('SDK de PayPal no cargó'));
+              setTimeout(tick, 120);
+            })();
+          });
+        }
+
+        async function renderBtn(selector, plan){
           const cont = document.querySelector(selector);
           if (!cont) return;
+          try{
+            await waitForPayPal();
 
-          paypal.Buttons({
-            style: { layout:'vertical', shape:'pill', tagline:false },
-            createOrder: async function() {
-              const r = await fetch('paypal_create_order.php', {
-                method: 'POST',
-                headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
-                body: JSON.stringify({ plan })
-              });
-              if (!r.ok) {
-                const tx = await r.text().catch(()=> '');
-                alert('No se pudo crear la orden ('+r.status+').\n'+tx);
-                throw new Error('createOrder failed');
+            paypal.Buttons({
+              style: { layout:'vertical', shape:'pill', tagline:false },
+
+              createOrder: async function() {
+                const r = await fetch('paypal_create_order.php', {
+                  method: 'POST',
+                  headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+                  body: JSON.stringify({ plan }) // plus50 | plus120 | plus250
+                });
+                if (!r.ok) {
+                  const tx = await r.text().catch(()=> '');
+                  alert('No se pudo crear la orden (HTTP '+r.status+').\n'+tx);
+                  throw new Error('createOrder failed: '+r.status);
+                }
+                const d = await r.json().catch(()=> ({}));
+                if (!d.id) { alert('Respuesta inválida al crear la orden.'); throw new Error('missing order id'); }
+                return d.id;
+              },
+
+              onApprove: async function(data) {
+                if (!data?.orderID) { alert('Falta orderID para capturar.'); return; }
+                const r = await fetch('paypal_capture.php', {
+                  method:'POST',
+                  headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
+                  body: JSON.stringify({ orderID: data.orderID })
+                });
+                const d = await r.json().catch(()=> ({}));
+                if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
+                else { alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status))); }
+              },
+
+              onError: function(err){
+                console.error('PayPal onError:', err);
+                const msg = (err && (err.message || (err.toString && err.toString()))) || 'desconocido';
+                alert('❌ Error con PayPal Buttons: '+msg);
               }
-              const d = await r.json().catch(()=> ({}));
-              if (!d.id) { alert('Respuesta inválida al crear la orden.'); throw new Error('missing order id'); }
-              return d.id;
-            },
-            onApprove: async function(data) {
-              if (!data?.orderID) { alert('Falta orderID para capturar.'); return; }
-              const r = await fetch('paypal_capture.php', {
-                method:'POST',
-                headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-                body: JSON.stringify({ orderID: data.orderID })
-              });
-              const d = await r.json().catch(()=> ({}));
-              if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
-              else { alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status))); }
-            },
-            onError: function(err){ console.error(err); alert('❌ Error con PayPal Buttons. Reintenta.'); }
-          }).render(selector);
+            }).render(selector);
+          }catch(e){
+            console.error('PayPal render catch:', e);
+            alert('❌ No se pudo inicializar PayPal: '+(e.message||e));
+          }
         }
         renderBtn('#pp-plus50','plus50');
         renderBtn('#pp-plus120','plus120');
