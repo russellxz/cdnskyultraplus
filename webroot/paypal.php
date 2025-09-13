@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__.'/db.php';
 
-// ------------ LOG ------------
+/* ===================== LOG ===================== */
 if (!defined('PAYPAL_LOG')) {
   define('PAYPAL_LOG', __DIR__ . '/paypal.log');
 }
@@ -14,18 +14,19 @@ function pp_log($msg): void {
   } catch(Throwable $e) {}
 }
 
-// ------------ CONFIG ------------
+/* ===================== CONFIG ===================== */
 function paypal_cfg(): array {
-  $mode = setting_get('paypal_mode','sandbox') === 'live' ? 'live' : 'sandbox';
+  $mode = (setting_get('paypal_mode','sandbox') === 'live') ? 'live' : 'sandbox';
   return [
     'mode'   => $mode,
     'cid'    => setting_get('paypal_client_id',''),
     'secret' => setting_get('paypal_client_secret',''),
     'base'   => ($mode==='live') ? 'https://api.paypal.com' : 'https://api.sandbox.paypal.com',
+    'brand'  => setting_get('invoice_business','SkyUltraPlus'),
   ];
 }
 
-// ------------ TOKEN ------------
+/* ===================== TOKEN ===================== */
 function paypal_get_token(?string &$err = null): ?string {
   $cfg = paypal_cfg();
   if (!$cfg['cid'] || !$cfg['secret']) { $err='missing_creds'; return null; }
@@ -37,7 +38,7 @@ function paypal_get_token(?string &$err = null): ?string {
     CURLOPT_USERPWD        => $cfg['cid'].':'.$cfg['secret'],
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_HTTPHEADER     => ['Accept: application/json','Accept-Language: en_US'],
-    CURLOPT_TIMEOUT        => 20,
+    CURLOPT_TIMEOUT        => 25,
     CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
   ]);
   $body = curl_exec($ch);
@@ -55,7 +56,7 @@ function paypal_get_token(?string &$err = null): ?string {
   return null;
 }
 
-// ------------ API GENÉRICA ------------
+/* ===================== API GENÉRICA ===================== */
 function paypal_api(string $method, string $path, $data, ?int &$http=null, ?string &$err=null) {
   $cfg = paypal_cfg();
   $tok = paypal_get_token($err);
@@ -64,20 +65,34 @@ function paypal_api(string $method, string $path, $data, ?int &$http=null, ?stri
   $url = $cfg['base'].$path;
   $ch  = curl_init($url);
 
+  $headers = [
+    'Authorization: Bearer '.$tok,
+    'Content-Type: application/json',
+    'Accept: application/json',
+    'Prefer: return=representation',
+  ];
+
+  $payload = null;
+  $m = strtoupper($method);
+  if ($m!=='GET') {
+    // Forzamos {} cuando sea vacío para evitar MALFORMED_REQUEST_JSON
+    $payload = json_encode(($data===null||$data===[])?(object)[]:$data, JSON_UNESCAPED_SLASHES);
+  }
+
   $opts = [
     CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_HTTPHEADER     => [
-      'Authorization: Bearer '.$tok,
-      'Content-Type: application/json',
-      'Accept: application/json',
-    ],
+    CURLOPT_HTTPHEADER     => $headers,
     CURLOPT_TIMEOUT        => 25,
     CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
   ];
 
-  $m = strtoupper($method);
-  if ($m==='POST') { $opts[CURLOPT_POST] = true; $opts[CURLOPT_POSTFIELDS] = json_encode($data ?: new stdClass(), JSON_UNESCAPED_SLASHES); }
-  elseif ($m!=='GET') { $opts[CURLOPT_CUSTOMREQUEST] = $m; $opts[CURLOPT_POSTFIELDS] = json_encode($data ?: new stdClass(), JSON_UNESCAPED_SLASHES); }
+  if ($m==='POST') {
+    $opts[CURLOPT_POST] = true;
+    $opts[CURLOPT_POSTFIELDS] = $payload;
+  } elseif ($m!=='GET') {
+    $opts[CURLOPT_CUSTOMREQUEST] = $m;
+    $opts[CURLOPT_POSTFIELDS]    = $payload;
+  }
 
   curl_setopt_array($ch, $opts);
   $res  = curl_exec($ch);
@@ -87,15 +102,16 @@ function paypal_api(string $method, string $path, $data, ?int &$http=null, ?stri
 
   if ($http>=200 && $http<300) {
     $j = json_decode($res,true);
+    pp_log(['API '.$m.' '.$path.' OK '.$http, 'req'=>$data, 'res'=>$j?:$res]);
     return $j ?: $res;
   }
 
   $err = 'api_http_'.$http.($ce?':'.$ce:'');
-  pp_log(['api_err'=>$err,'url'=>$url,'method'=>$m,'data'=>$data,'res'=>$res]);
+  pp_log(['API '.$m.' '.$path.' ERROR', 'http'=>$http, 'err'=>$err, 'req'=>$data, 'res'=>$res]);
   return json_decode($res,true) ?: $res;
 }
 
-// ------------ CATÁLOGO DE PLANES ------------
+/* ===================== CATÁLOGO PLANES ===================== */
 function plans_catalog(): array {
   return [
     'PLUS50'  => ['name'=>'+50 archivos',  'usd'=>1.37, 'inc'=>50],
