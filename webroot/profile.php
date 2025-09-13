@@ -14,12 +14,6 @@ $pdo->exec("CREATE INDEX IF NOT EXISTS files_userid_name ON files(user_id, name)
 
 // Límite por plan
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
-
-// WhatsApp helper
-function wa_link($plan){ global $me;
-  $msg="Hola, quiero comprar el plan $plan para mi CDN (usuario: ".$me['email'].")";
-  return WHATSAPP_URL.'?text='.urlencode($msg);
-}
 ?>
 <!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -139,7 +133,8 @@ function wa_link($plan){ global $me;
         <script>
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
-          const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\''.wa_link('Deluxe ($2.50/mes)').'\' target=\\"_blank\\">Plan Deluxe</a>"' ?>;
+          // Upsell sin WhatsApp: linkea al bloque de pagos
+          const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\\"#payplans\\">Mejorar a Deluxe</a>"' ?>;
 
           const up    = document.getElementById('up');
           const out   = document.getElementById('out');
@@ -210,48 +205,13 @@ function wa_link($plan){ global $me;
     </div>
   </div>
 
-  <!-- PLANES (debajo) -->
-  <div class="card" style="margin-top:14px">
-    <h3>Planes y mejoras</h3>
-    <div class="plans">
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+50 archivos</div>
-        <div class="price">$1.37</div>
-        <div class="muted">Aumenta tu límite en 50 archivos.</div>
-        <a class="btn" href="<?=wa_link('+50 archivos ($1.37)')?>" target="_blank">Hablar por WhatsApp</a>
-      </div>
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+120 archivos</div>
-        <div class="price">$2.45</div>
-        <div class="muted">Aumenta tu límite en 120 archivos.</div>
-        <a class="btn" href="<?=wa_link('+120 archivos ($2.45)')?>" target="_blank">Hablar por WhatsApp</a>
-      </div>
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">+250 archivos</div>
-        <div class="price">$3.55</div>
-        <div class="muted">Aumenta tu límite en 250 archivos.</div>
-        <a class="btn" href="<?=wa_link('+250 archivos ($3.55)')?>" target="_blank">Hablar por WhatsApp</a>
-      </div>
-      <div class="plan">
-        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
-        <div class="title">Plan Deluxe</div>
-        <div class="price">$2.50 / mes</div>
-        <div class="muted">Sube hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo.</div>
-        <a class="btn" href="<?=wa_link('Deluxe ($2.50/mes)')?>" target="_blank">Hablar por WhatsApp</a>
-      </div>
-    </div>
-  </div>
-
   <?php
     // --- PayPal: mostrar botones sólo si está configurado ---
-    $pp_cid  = setting_get('paypal_client_id','');   // viene de Admin → Pagos
+    $pp_cid  = setting_get('paypal_client_id','');   // Admin → Pagos
   ?>
 
   <?php if ($pp_cid): ?>
-    <div class="card" style="margin-top:14px">
+    <div id="payplans" class="card" style="margin-top:14px">
       <h3>Pagos automáticos (PayPal)</h3>
       <div class="plans">
         <div class="plan">
@@ -318,7 +278,7 @@ function wa_link($plan){ global $me;
                 const r = await fetch('paypal_capture.php', {
                   method:'POST',
                   headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ orderID: data.orderID })
+                  body: JSON.stringify({ orderID: data.orderID, plan }) // enviamos plan también
                 });
                 const d = await r.json().catch(()=> ({}));
                 if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
@@ -336,7 +296,7 @@ function wa_link($plan){ global $me;
             alert('❌ No se pudo inicializar PayPal: '+(e.message||e));
           }
         }
-        // IMPORTANTE: Enviamos en MAYÚSCULAS para coincidir con el catálogo del backend
+        // Enviar códigos del plan en MAYÚSCULAS
         renderBtn('#pp-plus50','PLUS50');
         renderBtn('#pp-plus120','PLUS120');
         renderBtn('#pp-plus250','PLUS250');
