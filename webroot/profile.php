@@ -9,7 +9,10 @@ $st->execute([$uid]); $me=$st->fetch();
 $c=$pdo->prepare("SELECT COUNT(*) c FROM files WHERE user_id=?"); $c->execute([$uid]);
 $used=(int)$c->fetch()['c']; $remain=max(0,(int)$me['quota_limit']-$used);
 
-// 👇 Casting estricto para evitar ambigüedades
+// Índice (por si no existe) para que el buscador sea rápido
+$pdo->exec("CREATE INDEX IF NOT EXISTS files_userid_name ON files(user_id, name)");
+
+// Límite por plan
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 
 // WhatsApp helper
@@ -47,8 +50,6 @@ function wa_link($plan){ global $me;
   @media(min-width:860px){ .row2{grid-template-columns:1fr} }
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);font-weight:800}
   .pill.grad{background:linear-gradient(90deg,#0ea5e9,#22d3ee); color:#051425; border:none}
-
-  /* Tarjetas de planes */
   .plans{display:grid;gap:16px}
   @media(min-width:900px){.plans{grid-template-columns:repeat(4,1fr)}}
   .plan{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:14px;text-align:center}
@@ -60,10 +61,18 @@ function wa_link($plan){ global $me;
   .bad{background:#172554;border:1px solid #334155;border-radius:999px;padding:4px 10px;margin-left:8px}
   code{user-select:all}
 
-  /* Bloques del upload */
+  /* Upload + mensajes */
   .item{display:flex;align-items:center;gap:10px;border:1px solid #334155;background:#0f172a;border-radius:10px;padding:10px;margin-top:8px}
   .item .url{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item.err{border-color:#7f1d1d;background:rgba(127,29,29,.15)}
+
+  /* Buscador rápido */
+  .quick{display:grid;gap:10px}
+  .searchbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .results{display:grid;gap:8px}
+  .r{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
+     background:#0f172a;border:1px solid #334155;border-radius:10px;padding:8px}
+  .r .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head><body><div class="wrap">
 
@@ -105,6 +114,19 @@ function wa_link($plan){ global $me;
     </p>
   </div>
 
+  <!-- BUSCADOR RÁPIDO -->
+  <div class="card" style="margin-top:14px">
+    <div class="quick">
+      <div class="searchbar">
+        <input id="q" class="input" placeholder="Buscar rápido… (nombre o parte de la URL)" autocomplete="off">
+        <button class="btn" id="qBtn" type="button">Buscar</button>
+        <a class="btn ghost" href="list.php">Abrir listado completo</a>
+      </div>
+      <p class="muted" id="qHint">Escribe para buscar. Se muestran hasta 10 coincidencias.</p>
+      <div class="results" id="qRes"></div>
+    </div>
+  </div>
+
   <!-- SUBIR -->
   <div class="row row2" style="margin-top:14px">
     <div class="card">
@@ -135,7 +157,6 @@ function wa_link($plan){ global $me;
           up?.addEventListener('submit', async e => {
             e.preventDefault();
 
-            // Pre-chequeo por tamaño (cliente)
             const f = fileI.files?.[0];
             if(!f){ msg(false,'<span>❌</span> Selecciona un archivo.'); return; }
             if (f.size > MAX_MB*1024*1024) {
@@ -143,23 +164,18 @@ function wa_link($plan){ global $me;
               return;
             }
 
-            // Subir
             upBtn.disabled = true; const old=upBtn.textContent; upBtn.textContent='Subiendo…';
             try{
               const r = await fetch('upload.php', { method:'POST', body:new FormData(up) });
-
-              // Manejo explícito de errores HTTP
               if(!r.ok){
                 if(r.status === 413){
-                  msg(false, `<span>❌</span> El servidor rechazó el archivo por ser demasiado grande (HTTP 413). Revisa <code>client_max_body_size</code> de Nginx y <code>upload_max_filesize/post_max_size</code> de PHP.`);
+                  msg(false, `<span>❌</span> Archivo demasiado grande (HTTP 413). Revisa <code>client_max_body_size</code> y <code>upload_max_filesize/post_max_size</code>.`);
                 }else{
                   const tx = await r.text();
                   msg(false, `<span>❌</span> Error del servidor (${r.status}). ${tx ? tx.replace(/</g,'&lt;') : ''}`);
                 }
                 return;
               }
-
-              // Intentar parsear como JSON
               const text = await r.text();
               let j = null; try { j = JSON.parse(text); } catch {}
               if (!j) { msg(false, `<span>❌</span> Respuesta inesperada del servidor.`); return; }
@@ -171,10 +187,7 @@ function wa_link($plan){ global $me;
                   <a class="url" href="${url}" target="_blank">${url}</a>
                   <button type="button" class="btn btn-sm" data-url="${url}">Copiar URL</button>
                 `);
-                // Mostrar aviso de compatibilidad si el servidor lo envía
-                if (j.warn) {
-                  msg(true, `<span>ℹ️</span> ${j.warn}`);
-                }
+                if (j.warn) msg(true, `<span>ℹ️</span> ${j.warn}`);
                 up.reset();
               } else {
                 msg(false, `<span>❌</span> ${j.error || 'Error'}${deluxeCTA}`);
@@ -186,7 +199,6 @@ function wa_link($plan){ global $me;
             }
           });
 
-          // Copiar URL (delegación)
           out.addEventListener('click', async (e) => {
             const btn = e.target.closest('button[data-url]');
             if (!btn) return;
@@ -247,6 +259,52 @@ function wa_link($plan){ global $me;
   copyBtn?.addEventListener('click',async()=>{
     const t=document.getElementById('apikey')?.innerText||'';
     try{ await navigator.clipboard.writeText(t); copyBtn.textContent='¡Copiada!'; setTimeout(()=>copyBtn.textContent='Copiar API Key',1500);}catch(e){}
+  });
+
+  // ---------- Buscador rápido ----------
+  const qInput = document.getElementById('q');
+  const qBtn   = document.getElementById('qBtn');
+  const qRes   = document.getElementById('qRes');
+  const qHint  = document.getElementById('qHint');
+
+  function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+  let t=null, ctl=null;
+  async function runSearch(){
+    const q = qInput.value.trim();
+    if (ctl) ctl.abort(); ctl = new AbortController();
+    try{
+      qHint.textContent='Buscando…';
+      const r = await fetch(`list.php?ajax=1&q=${encodeURIComponent(q)}`, {signal: ctl.signal});
+      const j = await r.json();
+      const items = (j.items||[]).slice(0,10);
+      if(items.length===0){ qRes.innerHTML='<p class="muted">Sin resultados.</p>'; }
+      else{
+        qRes.innerHTML = items.map(it=>`
+          <div class="r">
+            <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
+            <div class="muted" style="white-space:nowrap">${esc(it.size_fmt)} · ${esc(it.created_fmt)}</div>
+            <div style="display:flex;gap:8px">
+              <a class="btn" href="${esc(it.url)}" target="_blank">Abrir</a>
+              <button class="btn" type="button" data-url="${esc(it.url)}">Copiar URL</button>
+            </div>
+          </div>
+        `).join('');
+      }
+      qHint.textContent = q ? `Resultados para “${q}” · máx. 10` : 'Escribe para buscar';
+    }catch(e){
+      if (e.name!=='AbortError'){ qRes.innerHTML='<p class="muted">Error al buscar.</p>'; qHint.textContent='Intenta de nuevo.'; }
+    }
+  }
+  function deb(){ clearTimeout(t); t=setTimeout(runSearch, 280); }
+  qInput?.addEventListener('input', deb);
+  qBtn?.addEventListener('click', runSearch);
+
+  qRes.addEventListener('click', async (e)=>{
+    const b=e.target.closest('button[data-url]'); if(!b) return;
+    try{ await navigator.clipboard.writeText(b.dataset.url);
+      const old=b.textContent; b.textContent='¡Copiado!'; setTimeout(()=>b.textContent=old,1200);
+    }catch{ alert('No se pudo copiar automáticamente.\n'+b.dataset.url); }
   });
 </script>
 </body></html>
