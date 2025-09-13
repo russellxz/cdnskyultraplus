@@ -118,8 +118,17 @@ function wa_link($plan){ global $me;
   <!-- SUBIR -->
   <div class="row row2" style="margin-top:14px">
     <div class="card">
-      <h3>Subir archivo</h3>
-    <!-- BUSCADOR RÁPIDO -->
+      <h3>Subir archivo</h3>    
+<?php if(!(int)$me['verified']): ?>
+        <p>❌ Debes <b>verificar tu correo</b> antes de subir archivos.</p>
+      <?php else: ?>
+        <form id="up" enctype="multipart/form-data">
+          <input class="input" name="name" placeholder="Nombre para buscar (ej: logo azul, nota #1)" required>
+          <input class="input" id="file" type="file" name="file" required style="margin-top:8px">
+          <button class="btn" id="upBtn" style="margin-top:8px">Subir</button>
+        </form>
+        <div id="out" style="margin-top:10px"></div>
+        <!-- BUSCADOR RÁPIDO -->
   <div class="card" style="margin-top:14px">
     <div class="quick">
       <div class="searchbar">
@@ -132,16 +141,7 @@ function wa_link($plan){ global $me;
     </div>
   </div> 
       
-<?php if(!(int)$me['verified']): ?>
-        <p>❌ Debes <b>verificar tu correo</b> antes de subir archivos.</p>
-      <?php else: ?>
-        <form id="up" enctype="multipart/form-data">
-          <input class="input" name="name" placeholder="Nombre para buscar (ej: logo azul, nota #1)" required>
-          <input class="input" id="file" type="file" name="file" required style="margin-top:8px">
-          <button class="btn" id="upBtn" style="margin-top:8px">Subir</button>
-        </form>
-        <div id="out" style="margin-top:10px"></div>
-        <script>
+      <script>
 
   
 
