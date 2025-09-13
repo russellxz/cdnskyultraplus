@@ -85,7 +85,7 @@ function flash_html(string $s): string {
 
   <div class="top">
     <img class="logo" src="https://cdn.russellxz.click/47d048e3.png" alt="SkyUltraPlus">
-    <h1>Bienvenido al CDN de SkyUltraPlus</h1>
+    <h1>Bienvenido al CDN de SkyUltraPlus (test)</h1>
     <p class="muted">Sube y gestiona tus archivos con protección y velocidad ⚡. <?=htmlspecialchars($plansText)?></p>
   </div>
 
