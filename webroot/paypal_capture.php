@@ -5,6 +5,14 @@ require_once __DIR__.'/paypal.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
+// ——— endurecer
+set_error_handler(function($no,$str,$file,$line){ throw new Error("$str @$file:$line"); });
+set_exception_handler(function($e){
+  pp_log(['capture_php_exception'=>get_class($e),'msg'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]);
+  http_response_code(200);
+  echo json_encode(['ok'=>false,'error'=>'php_exception','msg'=>$e->getMessage()]);
+});
+
 if (empty($_SESSION['uid'])) { echo json_encode(['ok'=>false,'error'=>'auth']); exit; }
 $uid = (int)$_SESSION['uid'];
 
@@ -22,32 +30,26 @@ if ($http!==201) {
   echo json_encode(['ok'=>false,'error'=>'capture_http_'.$http,'debug'=>$err,'res'=>$res]); exit;
 }
 
-// Validaciones de estado y extracción de custom_id
 $status = strtoupper($res['status'] ?? '');
 $pu     = $res['purchase_units'][0] ?? [];
 $custom = (string)($pu['custom_id'] ?? '');
 $plan   = $planCli;
-
-// Si no vino plan en el body, lo sacamos de custom_id "uid:PLAN"
 if (!$plan && $custom && strpos($custom, ':')!==false) {
   [$uidFrom, $planFrom] = explode(':', $custom, 2);
   $plan = strtoupper(preg_replace('/[^A-Z0-9_]/','', $planFrom));
 }
 
-// Estado válido para considerar pago OK
 if ($status!=='COMPLETED' && $status!=='APPROVED') {
   pp_log(['invalid_state'=>$status,'order'=>$orderID,'custom'=>$custom]);
   echo json_encode(['ok'=>false,'error'=>'invalid_state_or_plan','state'=>$status]); exit;
 }
 
-// Plan debe existir
 $cat = plans_catalog();
 if (!$plan || !isset($cat[$plan])) {
   pp_log(['missing_plan'=>$plan,'from_custom'=>$custom]);
   echo json_encode(['ok'=>false,'error'=>'invalid_state_or_plan']); exit;
 }
 
-// Registrar pago y aumentar cuota
 try {
   $pdo->beginTransaction();
 
@@ -76,5 +78,5 @@ try {
 } catch(Throwable $e) {
   $pdo->rollBack();
   pp_log(['db_err'=>$e->getMessage()]);
-  echo json_encode(['ok'=>false,'error'=>'db', 'msg'=>$e->getMessage()]); exit;
+  echo json_encode(['ok'=>false,'error'=>'db','msg'=>$e->getMessage()]); exit;
 }
