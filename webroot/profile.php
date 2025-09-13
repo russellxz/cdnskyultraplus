@@ -114,19 +114,7 @@ function wa_link($plan){ global $me;
     </p>
   </div>
 
-  <!-- BUSCADOR RÁPIDO -->
-  <div class="card" style="margin-top:14px">
-    <div class="quick">
-      <div class="searchbar">
-        <input id="q" class="input" placeholder="Buscar rápido… (nombre o parte de la URL)" autocomplete="off">
-        <button class="btn" id="qBtn" type="button">Buscar</button>
-        <a class="btn ghost" href="list.php">Abrir listado completo</a>
-      </div>
-      <p class="muted" id="qHint">Escribe para buscar. Se muestran hasta 10 coincidencias.</p>
-      <div class="results" id="qRes"></div>
-    </div>
-  </div>
-
+  
   <!-- SUBIR -->
   <div class="row row2" style="margin-top:14px">
     <div class="card">
@@ -141,6 +129,21 @@ function wa_link($plan){ global $me;
         </form>
         <div id="out" style="margin-top:10px"></div>
         <script>
+
+  <!-- BUSCADOR RÁPIDO -->
+  <div class="card" style="margin-top:14px">
+    <div class="quick">
+      <div class="searchbar">
+        <input id="q" class="input" placeholder="Buscar rápido… (nombre o parte de la URL)" autocomplete="off">
+        <button class="btn" id="qBtn" type="button">Buscar</button>
+        <a class="btn ghost" href="list.php">Abrir listado completo</a>
+      </div>
+      <p class="muted" id="qHint">Escribe para buscar. Se muestran hasta 10 coincidencias.</p>
+      <div class="results" id="qRes"></div>
+    </div>
+  </div>
+
+          
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
           const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\''.wa_link('Deluxe ($2.50/mes)').'\' target=\\"_blank\\">Plan Deluxe</a>"' ?>;
