@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__.'/db.php';
+require_once __DIR__.'/paypal.php'; // para setting_any()
+
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
@@ -133,7 +135,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
         <script>
           const MAX_MB = <?= (int)$maxMB ?>;
           const IS_DELUXE = <?= ((int)$me['is_deluxe']===1) ? 'true' : 'false' ?>;
-          // Upsell sin WhatsApp: linkea al bloque de pagos
+          // Upsell sin WhatsApp: ancla al bloque de pagos
           const deluxeCTA = <?= ((int)$me['is_deluxe']===1) ? '""' : '" <a class=\\"btn btn-sm\\" href=\\"#payplans\\">Mejorar a Deluxe</a>"' ?>;
 
           const up    = document.getElementById('up');
@@ -207,7 +209,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
 
   <?php
     // --- PayPal: mostrar botones sólo si está configurado ---
-    $pp_cid  = setting_get('paypal_client_id','');   // Admin → Pagos
+    $pp_cid  = setting_any('pp_client_id','');   // admite pp_* o paypal_*
   ?>
 
   <?php if ($pp_cid): ?>
@@ -234,7 +236,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
         </div>
       </div>
 
-      <!-- SDK con debug activado -->
+      <!-- SDK con debug activado mientras pruebas -->
       <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture&debug=true"></script>
       <script>
         function waitForPayPal(ms=8000){
@@ -278,7 +280,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 const r = await fetch('paypal_capture.php', {
                   method:'POST',
                   headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
-                  body: JSON.stringify({ orderID: data.orderID, plan }) // enviamos plan también
+                  body: JSON.stringify({ orderID: data.orderID }) // el backend extrae el plan del custom_id
                 });
                 const d = await r.json().catch(()=> ({}));
                 if (r.ok && d.ok) { alert('✅ Pago recibido. Tu límite aumentó +'+(d.inc||0)+' archivos.'); location.reload(); }
