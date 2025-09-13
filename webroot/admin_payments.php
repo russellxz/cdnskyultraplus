@@ -34,6 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('invoice_email',    $bizm);
     setting_set('invoice_prefix',   $pref);
 
+    // Plan de suscripción (Deluxe)
+    $plan = trim($_POST['pp_deluxe_plan_id'] ?? '');   // P-XXXXXXXXXXX
+    setting_set('pp_deluxe_plan_id', $plan);
+
     exit('OK');
   }
 
@@ -55,6 +59,9 @@ $pp_webhook = setting_get('paypal_webhook_id','');
 $biz_name   = setting_get('invoice_business','SkyUltraPlus');
 $biz_email  = setting_get('invoice_email','soporte@tu-dominio.com');
 $inv_prefix = setting_get('invoice_prefix','INV-');
+
+// Plan Deluxe (suscripción mensual)
+$pp_plan    = setting_get('pp_deluxe_plan_id',''); // P-XXXXXXXX...
 
 $host = $_SERVER['HTTP_HOST'] ?? '';
 $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
@@ -84,7 +91,7 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
   <p><a href="admin.php" style="color:#93c5fd">← Volver al Panel Admin</a></p>
 
   <div class="card">
-    <h3>Credenciales</h3>
+    <h3>Credenciales & Configuración</h3>
     <form onsubmit="saveCfg(event)">
       <div class="grid grid-2">
         <div>
@@ -125,6 +132,17 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
         </div>
       </div>
 
+      <h4 style="margin-top:16px">Suscripciones (Plan Deluxe)</h4>
+      <div class="grid">
+        <div style="grid-column:1 / -1">
+          <label class="small">Deluxe Plan ID (suscripción mensual)</label>
+          <input class="input" name="pp_deluxe_plan_id" value="<?=htmlspecialchars($pp_plan)?>" placeholder="P-XXXXXXXXXXXXXXX">
+        </div>
+        <p class="muted" style="margin:0">
+          Este <b>Plan ID</b> se crea en tu Dashboard de PayPal (Productos → Suscripciones) o por API. Debe tener ciclo <code>MONTH</code> cada 1, precio 2.50 USD.
+        </p>
+      </div>
+
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn">Guardar</button>
         <button class="btn" type="button" onclick="testCfg()">Probar credenciales</button>
@@ -133,7 +151,8 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
 
     <p class="muted" style="margin-top:10px">
       Webhook recomendado: <code><?=htmlspecialchars($webhook_url)?></code><br>
-      Eventos: <code>PAYMENT.CAPTURE.COMPLETED</code> y <code>CHECKOUT.ORDER.APPROVED</code>.
+      Eventos (órdenes): <code>PAYMENT.CAPTURE.COMPLETED</code>, <code>CHECKOUT.ORDER.APPROVED</code><br>
+      Eventos (suscripciones): <code>BILLING.SUBSCRIPTION.ACTIVATED</code>, <code>BILLING.SUBSCRIPTION.CANCELLED</code>, <code>BILLING.SUBSCRIPTION.SUSPENDED</code>, <code>BILLING.SUBSCRIPTION.EXPIRED</code>
     </p>
   </div>
 
