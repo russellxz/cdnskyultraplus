@@ -2,51 +2,68 @@
 require __DIR__.'/../db.php';
 header('Content-Type: application/json; charset=utf-8');
 
-$api = $_SERVER['HTTP_X_API_KEY'] ?? ($_POST['api_key'] ?? $_GET['api_key'] ?? '');
-if (!$api) { http_response_code(401); echo json_encode(['ok'=>false,'error'=>'Falta API key']); exit; }
+function jsonOut(array $p, int $status = 200){
+  http_response_code($status);
+  echo json_encode($p, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
+  exit;
+}
+
+// 🔑 API key
+$api = $_SERVER['HTTP_X_API_KEY'] ?? ($_POST['api_key'] ?? '');
+if (!$api) jsonOut(['ok'=>false,'error'=>'Falta API key'], 401);
 
 $st = $pdo->prepare("SELECT id, quota_limit FROM users WHERE api_key=? AND verified=1");
 $st->execute([$api]);
 $u = $st->fetch();
-if (!$u) { http_response_code(401); echo json_encode(['ok'=>false,'error'=>'API key inválida']); exit; }
+if (!$u) jsonOut(['ok'=>false,'error'=>'API key inválida'], 401);
 
-$user_id = intval($u['id']);
+$uid = (int)$u['id'];
 
-// Cuota
-$cq = $pdo->prepare("SELECT COUNT(*) c FROM files WHERE user_id=?");
-$cq->execute([$user_id]);
-$used = intval($cq->fetch()['c']);
-if ($used >= intval($u['quota_limit'])) {
-  echo json_encode(['ok'=>false,'error'=>"Cuota alcanzada. Precio por ampliar: $".number_format(PRICE_USD,2)." USD"]); exit;
-}
+/* Nombre */
+$name = $_POST['name'] ?? '';
+if ($name === '') jsonOut(['ok'=>false,'error'=>'Debes poner un nombre al archivo']);
 
-// Validaciones
+/* Archivo */
 if (!isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
-  echo json_encode(['ok'=>false,'error'=>'Archivo faltante']); exit;
+  jsonOut(['ok'=>false,'error'=>'Archivo faltante']);
 }
-$name = clean_label($_POST['name'] ?? '');
-if ($name === '') { echo json_encode(['ok'=>false,'error'=>'Debes incluir "name"']); exit; }
 
-$allowed = [
-  'image/jpeg','image/png','image/webp','image/gif',
-  'audio/mpeg','audio/ogg','audio/opus','audio/mp4','audio/x-m4a','audio/wav',
-  'video/mp4','video/webm',
-  'application/pdf'
-];
-$mime = mime_content_type($_FILES['file']['tmp_name']) ?: $_FILES['file']['type'];
-$size = filesize($_FILES['file']['tmp_name']);
-$ext  = strtolower(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION));
-if (!in_array($mime, $allowed)) { echo json_encode(['ok'=>false,'error'=>"Tipo no permitido ($mime)"]); exit; }
+$sizeBytes = (int)$_FILES['file']['size'];
+if ($sizeBytes <= 0) jsonOut(['ok'=>false,'error'=>'Archivo vacío o inválido']);
 
-$dir = dirname(__DIR__).'/uploads/'.$user_id;
-if (!is_dir($dir)) mkdir($dir, 0755, true);
+/* Carpeta */
+$dir = dirname(__DIR__).'/uploads/u'.$uid;
+if (!is_dir($dir)) mkdir($dir, 0775, true);
 
-$fname = time().'_'.bin2hex(random_bytes(4)).($ext?'.'.$ext:'');
-$dest  = $dir.'/'.$fname;
-if (!move_uploaded_file($_FILES['file']['tmp_name'], $dest)) { echo json_encode(['ok'=>false,'error'=>'No se pudo guardar']); exit; }
+$orig = $_FILES['file']['name'] ?? '';
+$ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+$fname = bin2hex(random_bytes(8)).($ext ? '.'.$ext : '');
+$path  = $dir.'/'.$fname;
+$url   = BASE_URL.'/uploads/u'.$uid.'/'.$fname;
 
-$url = BASE_URL.'/uploads/'.$user_id.'/'.$fname;
-$pdo->prepare("INSERT INTO files(user_id,name,filename,mime,size,url) VALUES(?,?,?,?,?,?)")
-    ->execute([$user_id,$name,$fname,$mime,$size,$url]);
+if (!move_uploaded_file($_FILES['file']['tmp_name'], $path)) {
+  jsonOut(['ok'=>false,'error'=>'No se pudo guardar el archivo'], 500);
+}
+@chmod($path, 0644);
 
-echo json_encode(['ok'=>true,'url'=>$url,'name'=>$name,'size'=>$size]);
+$finfo = @finfo_open(FILEINFO_MIME_TYPE);
+$mime  = $finfo ? (finfo_file($finfo, $path) ?: 'application/octet-stream') : 'application/octet-stream';
+if ($finfo) @finfo_close($finfo);
+$origName = $orig !== '' ? $orig : $fname;
+
+/* Insert con fallback */
+try {
+  $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name) VALUES(?,?,?,?,?,?,?)";
+  $pdo->prepare($sql)->execute([$uid, $name, $url, $path, $sizeBytes, $mime, $origName]);
+} catch (Throwable $e) {
+  try {
+    $pdo->prepare("INSERT INTO files(user_id,name,url,path,size_bytes) VALUES(?,?,?,?,?)")
+        ->execute([$uid, $name, $url, $path, $sizeBytes]);
+  } catch (Throwable $e2) {
+    @unlink($path);
+    jsonOut(['ok'=>false,'error'=>'Error en BD'], 500);
+  }
+}
+
+/* OK */
+jsonOut(['ok'=>true,'file'=>['name'=>$name,'url'=>$url,'mime'=>$mime,'orig'=>$origName]]);
