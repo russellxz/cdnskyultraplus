@@ -8,37 +8,23 @@ function jsonOut(array $p, int $status = 200){
   exit;
 }
 
-/* === Autenticación: sesión o API key === */
-$uid = null;
-
-// 1. Revisa si viene API key
-$api = $_SERVER['HTTP_X_API_KEY'] ?? ($_GET['api_key'] ?? '');
-if ($api) {
-  $st = $pdo->prepare("SELECT id,is_deluxe,verified,email,quota_limit FROM users WHERE api_key=? LIMIT 1");
-  $st->execute([$api]);
-  $me = $st->fetch();
-  if (!$me || (int)$me['verified'] !== 1) {
-    jsonOut(['ok'=>false,'error'=>'API key inválida o cuenta no verificada'], 401);
-  }
-  $uid = (int)$me['id'];
-} else {
-  // 2. Si no hay API key, usa sesión
-  if (empty($_SESSION['uid'])) {
-    jsonOut(['ok'=>false,'error'=>'No autenticado'], 401);
-  }
-  $uid = (int)$_SESSION['uid'];
-  $u = $pdo->prepare("SELECT is_deluxe,verified,email,quota_limit FROM users WHERE id=?");
-  $u->execute([$uid]);
-  $me = $u->fetch();
-  if (!$me)                        jsonOut(['ok'=>false,'error'=>'Usuario no encontrado'], 404);
-  if ((int)$me['verified'] !== 1)  jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+if (empty($_SESSION['uid'])) {
+  jsonOut(['ok'=>false,'error'=>'No autenticado'], 401);
 }
+$uid = (int)$_SESSION['uid'];
 
-/* Nombre humano obligatorio */
+/* Datos del usuario (incluye deluxe/verified/cuota) */
+$u = $pdo->prepare("SELECT is_deluxe, verified, email, quota_limit FROM users WHERE id=?");
+$u->execute([$uid]);
+$me = $u->fetch();
+if (!$me)                        jsonOut(['ok'=>false,'error'=>'Usuario no encontrado'], 404);
+if ((int)$me['verified'] !== 1)  jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+
+/* Nombre “humano” obligatorio */
 $name = clean_label($_POST['name'] ?? '');
-if ($name === '') jsonOut(['ok'=>false,'error'=>'Debes poner un nombre al archivo']);
+if ($name === '')                jsonOut(['ok'=>false,'error'=>'Debes poner un nombre al archivo']);
 
-/* Archivo presente */
+/* Archivo presente + manejo de errores PHP */
 if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
   jsonOut(['ok'=>false,'error'=>'Archivo faltante']);
 }
@@ -72,7 +58,7 @@ if ($sizeBytes > $maxMB * 1024 * 1024) {
   jsonOut(['ok'=>false,'error'=>"Tu archivo excede el límite de {$maxMB}MB"]);
 }
 
-/* Cuota */
+/* Cuota por cantidad antes de mover */
 $cnt = $pdo->prepare("SELECT COUNT(*) AS c FROM files WHERE user_id=?");
 $cnt->execute([$uid]);
 $usados = (int)$cnt->fetch()['c'];
@@ -88,35 +74,46 @@ if (!is_dir($dir) && !@mkdir($dir, 0775, true)) {
   jsonOut(['ok'=>false,'error'=>'No se pudo preparar el directorio de usuario'], 500);
 }
 
-/* Nombre físico único */
+/* Nombre físico seguro y único */
 $orig = $_FILES['file']['name'] ?? '';
 $ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
-$ext  = preg_replace('/[^a-z0-9_\-]/i', '', $ext);
+$ext  = preg_replace('/[^a-z0-9_\-]/i', '', $ext); // solo letras/números/_/-
 $ext  = $ext !== '' ? ('.'.$ext) : '';
 
 $tries = 5;
 do {
-  $fname = bin2hex(random_bytes(8)).$ext;
+  $fname = bin2hex(random_bytes(8)).$ext; // más entropía
   $path  = $dir.'/'.$fname;
   $url   = BASE_URL.'/uploads/u'.$uid.'/'.$fname;
 } while (file_exists($path) && --$tries > 0);
 
-/* Guardar en disco */
+/* Mover a disco */
 if (!move_uploaded_file($_FILES['file']['tmp_name'], $path)) {
   jsonOut(['ok'=>false,'error'=>'No se pudo guardar el archivo'], 500);
 }
 @chmod($path, 0644);
 
-/* MIME y BD */
+/* === Compatibilidad: MIME real + nombre original + aviso opcional === */
 $finfo = @finfo_open(FILEINFO_MIME_TYPE);
 $mime  = $finfo ? (finfo_file($finfo, $path) ?: 'application/octet-stream') : 'application/octet-stream';
 if ($finfo) @finfo_close($finfo);
 $origName = $orig !== '' ? $orig : $fname;
 
+/* Aviso no bloqueante si no es un formato “amigable” de navegador */
+$browserFriendly = [
+  'image/jpeg','image/png','image/webp','image/gif',
+  'audio/mpeg','audio/aac','audio/ogg',
+  'video/mp4','video/webm'
+];
+$warn = in_array($mime, $browserFriendly, true) ? null
+       : 'Formato no estándar para navegador (se subió igual).';
+
+/* Guarda registro en BD — con tolerancia de esquema (mime/orig_name opcionales) */
 try {
   $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name) VALUES(?,?,?,?,?,?,?)";
   $pdo->prepare($sql)->execute([$uid, $name, $url, $path, $sizeBytes, $mime, $origName]);
 } catch (Throwable $e) {
+  // Si la tabla aún no tiene columnas mime/orig_name, cae al esquema antiguo
   try {
     $pdo->prepare("INSERT INTO files(user_id,name,url,path,size_bytes) VALUES(?,?,?,?,?)")
         ->execute([$uid, $name, $url, $path, $sizeBytes]);
@@ -128,4 +125,5 @@ try {
 
 /* OK */
 $out = ['ok'=>true,'file'=>['name'=>$name,'url'=>$url,'mime'=>$mime,'orig'=>$origName]];
+if ($warn) $out['warn'] = $warn;
 jsonOut($out);
