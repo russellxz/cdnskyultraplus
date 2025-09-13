@@ -1,6 +1,6 @@
 <?php
 // URL pública (sin slash final)
-const BASE_URL = 'https://cdnsky.ultraplus.click';
+const BASE_URL = 'https://cdn.skyultraplus.com';
 
 // WhatsApp (contacto)
 const WHATSAPP_URL = 'https://wa.me/15167096032';
