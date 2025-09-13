@@ -5,8 +5,8 @@ require_once __DIR__.'/paypal.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-// ——— endurecer: convertir warnings a excepciones y responder 200 siempre
-set_error_handler(function($no,$str,$file,$line){ throw new Error("$str @$file:$line"); });
+// Convertir warnings a excepciones y NUNCA devolver 500
+set_error_handler(function($n,$s,$f,$l){ throw new Error("$s @$f:$l"); });
 set_exception_handler(function($e){
   pp_log(['create_php_exception'=>get_class($e),'msg'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]);
   http_response_code(200);
@@ -26,7 +26,9 @@ if (!$plan || !isset($cat[$plan])) {
   exit;
 }
 
+$cfg    = paypal_cfg();
 $amount = number_format((float)$cat[$plan]['usd'], 2, '.', '');
+
 $body = [
   'intent' => 'CAPTURE',
   'purchase_units' => [[
@@ -35,11 +37,11 @@ $body = [
     'custom_id'   => $uid.':'.$plan,
   ]]],
   'application_context' => [
-    'brand_name'   => setting_get('invoice_business','SkyUltraPlus'),
+    'brand_name'          => $cfg['brand'],
     'shipping_preference' => 'NO_SHIPPING',
-    'user_action'  => 'PAY_NOW',
-    'return_url'   => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
-    'cancel_url'   => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
+    'user_action'         => 'PAY_NOW',
+    'return_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
+    'cancel_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
   ],
 ];
 
@@ -50,6 +52,6 @@ if ($http===201 && !empty($res['id'])) {
   echo json_encode(['ok'=>true,'id'=>$res['id']]); exit;
 }
 
-pp_log(['create_fail'=>true,'http'=>$http,'err'=>$err,'res'=>$res]);
+pp_log(['create_failed'=>true,'http'=>$http,'err'=>$err,'res'=>$res]);
 http_response_code(200);
 echo json_encode(['ok'=>false,'error'=>'create_failed','http'=>$http,'debug'=>$err,'res'=>$res]);
