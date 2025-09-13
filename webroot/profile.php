@@ -259,21 +259,15 @@ function wa_link($plan){ global $me;
 
 <?php
   // Mostrar botones PayPal solo si hay Client ID configurado en Admin → Pagos
-  $pp_cid  = setting_get('paypal_client_id','');
-  $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox | live (informativo)
+<?php
+// --- PayPal: mostrar botones sólo si está configurado ---
+$pp_cid  = setting_get('paypal_client_id','');         // viene de Admin → Pagos
+$pp_mode = setting_get('paypal_mode','sandbox');       // sandbox | live
 ?>
-<div class="card" style="margin-top:14px">
-  <h3>Pagos automáticos (PayPal)</h3>
 
-  <?php if (!$pp_cid): ?>
-    <p class="muted">
-      Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.
-    </p>
-  <?php else: ?>
-    <p class="muted" style="margin-top:-6px;margin-bottom:8px">
-      Modo: <b><?=htmlspecialchars(strtoupper($pp_mode))?></b>
-    </p>
-
+<?php if ($pp_cid): ?>
+  <div class="card" style="margin-top:14px">
+    <h3>Pagos automáticos (PayPal)</h3>
     <div class="plans">
       <div class="plan">
         <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
@@ -295,10 +289,9 @@ function wa_link($plan){ global $me;
       </div>
     </div>
 
-    <!-- SDK de PayPal -->
+    <!-- SDK de PayPal (usa el Client ID guardado en settings) -->
     <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
 
-    <!-- Render de botones (create + capture) -->
     <script>
       function renderBtn(selector, plan){
         const cont = document.querySelector(selector);
@@ -311,7 +304,7 @@ function wa_link($plan){ global $me;
             const r = await fetch('paypal_create_order.php', {
               method: 'POST',
               headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
-              body: JSON.stringify({ plan })
+              body: JSON.stringify({ plan }) // plus50 | plus120 | plus250
             });
 
             if (!r.ok) {
@@ -355,13 +348,19 @@ function wa_link($plan){ global $me;
         }).render(selector);
       }
 
-      // Renderizar cada plan
+      // Render de los tres botones
       renderBtn('#pp-plus50','plus50');
       renderBtn('#pp-plus120','plus120');
       renderBtn('#pp-plus250','plus250');
     </script>
-  <?php endif; ?>
-</div>
+  </div>
+<?php elseif ((int)$me['is_admin'] === 1): ?>
+  <!-- Si NO hay PayPal configurado, sólo el admin ve este aviso -->
+  <div class="card" style="margin-top:14px">
+    <h3>Pagos automáticos (PayPal)</h3>
+    <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
+  </div>
+<?php endif; ?>
   
 </div>
 <script>
