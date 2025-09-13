@@ -257,6 +257,71 @@ function wa_link($plan){ global $me;
     </div>
   </div>
 
+<?php
+  $pp_cid  = setting_get('paypal_client_id','');
+  $pp_mode = setting_get('paypal_mode','sandbox'); // sandbox|live
+?>
+<div class="card" style="margin-top:14px">
+  <h3>Pagos automáticos (PayPal)</h3>
+  <?php if (!$pp_cid): ?>
+    <p class="muted">Configura PayPal en <a href="admin_payments.php">Admin → Pagos</a> para mostrar estos botones.</p>
+  <?php else: ?>
+    <div class="plans">
+      <div class="plan">
+        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+        <div class="title">+50 archivos</div>
+        <div class="price">$1.37</div>
+        <div id="pp-plus50"></div>
+      </div>
+      <div class="plan">
+        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+        <div class="title">+120 archivos</div>
+        <div class="price">$2.45</div>
+        <div id="pp-plus120"></div>
+      </div>
+      <div class="plan">
+        <img src="https://cdn.russellxz.click/47d048e3.png" alt="">
+        <div class="title">+250 archivos</div>
+        <div class="price">$3.55</div>
+        <div id="pp-plus250"></div>
+      </div>
+    </div>
+
+    <script src="https://www.paypal.com/sdk/js?client-id=<?=htmlspecialchars($pp_cid)?>&currency=USD&intent=capture"></script>
+    <script>
+      function renderBtn(selector, plan){
+        paypal.Buttons({
+          style: { layout:'vertical', shape:'pill', tagline:false },
+          createOrder: function() {
+            return fetch('paypal_create_order.php', {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json' },
+              body: JSON.stringify({ plan })
+            }).then(r=>r.json()).then(d=>d.id);
+          },
+          onApprove: function(data) {
+            return fetch('paypal_capture.php', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ orderID: data.orderID })
+            }).then(r=>r.json()).then(d=>{
+              if(d.ok){
+                alert('✅ Pago recibido. Tu límite aumentó +'+d.inc+' archivos.');
+                location.reload();
+              }else{
+                alert('❌ Error: '+(d.error||'fallo en la captura'));
+              }
+            });
+          }
+        }).render(selector);
+      }
+      renderBtn('#pp-plus50','plus50');
+      renderBtn('#pp-plus120','plus120');
+      renderBtn('#pp-plus250','plus250');
+    </script>
+  <?php endif; ?>
+</div>
+  
 </div>
 <script>
   // Copiar API Key
