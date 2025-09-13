@@ -1,57 +1,49 @@
 <?php
-declare(strict_types=1);
+// paypal_create_order.php
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/paypal.php';
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 
-// Convertir warnings a excepciones y NUNCA devolver 500
-set_error_handler(function($n,$s,$f,$l){ throw new Error("$s @$f:$l"); });
-set_exception_handler(function($e){
-  pp_log(['create_php_exception'=>get_class($e),'msg'=>$e->getMessage(),'file'=>$e->getFile(),'line'=>$e->getLine()]);
-  http_response_code(200);
-  echo json_encode(['ok'=>false,'error'=>'php_exception','msg'=>$e->getMessage()]);
-});
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'method']); exit; }
+if (empty($_SESSION['uid'])) { http_response_code(401); echo json_encode(['error'=>'auth']); exit; }
 
-if (empty($_SESSION['uid'])) { http_response_code(200); echo json_encode(['ok'=>false,'error'=>'auth']); exit; }
-$uid = (int)$_SESSION['uid'];
+$uid  = (int)$_SESSION['uid'];
+$raw  = file_get_contents('php://input');
+$inp  = json_decode($raw, true);
+$plan = strtoupper(trim($inp['plan'] ?? ''));
 
-$in   = json_decode(file_get_contents('php://input'), true) ?: $_POST;
-$plan = strtoupper(preg_replace('/[^A-Z0-9_]/','', $in['plan'] ?? ''));
-$cat  = plans_catalog();
+$cats = plans_catalog();
+if (!isset($cats[$plan])) { http_response_code(400); echo json_encode(['error'=>'plan_invalid']); exit; }
 
-if (!$plan || !isset($cat[$plan])) {
-  http_response_code(200);
-  echo json_encode(['ok'=>false,'error'=>'bad_plan','plans'=>array_keys($cat)]);
-  exit;
-}
+$amount = number_format($cats[$plan]['usd'], 2, '.', '');
+$brand  = setting_get('invoice_business', 'SkyUltraPlus');
 
-$cfg    = paypal_cfg();
-$amount = number_format((float)$cat[$plan]['usd'], 2, '.', '');
+$host = $_SERVER['HTTP_HOST'] ?? '';
+$baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https://' : 'http://').$host;
 
 $body = [
   'intent' => 'CAPTURE',
   'purchase_units' => [[
-    'amount'      => ['currency_code'=>'USD','value'=>$amount],
-    'description' => 'SkyUltraPlus '.$cat[$plan]['name'],
-    'custom_id'   => $uid.':'.$plan,
-  ]]],
+    'amount' => ['currency_code'=>'USD', 'value'=>$amount],
+    'description' => $brand.' '.$cats[$plan]['name'],
+    'custom_id' => $uid.':'.$plan, // <- nos llevamos usuario+plan para validarlo al capturar
+  ]],
   'application_context' => [
-    'brand_name'          => $cfg['brand'],
-    'shipping_preference' => 'NO_SHIPPING',
-    'user_action'         => 'PAY_NOW',
-    'return_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
-    'cancel_url'          => 'https://'.($_SERVER['HTTP_HOST'] ?? '').'/profile.php',
+    'brand_name'        => $brand,
+    'shipping_preference'=> 'NO_SHIPPING',
+    'user_action'       => 'PAY_NOW',
+    'return_url'        => $baseUrl.'/profile.php', // por si el SDK lo necesita
+    'cancel_url'        => $baseUrl.'/profile.php',
   ],
 ];
 
-$http=0; $err=null;
-$res = paypal_api('POST','/v2/checkout/orders',$body,$http,$err);
-
-if ($http===201 && !empty($res['id'])) {
-  echo json_encode(['ok'=>true,'id'=>$res['id']]); exit;
+$err = null; $http = 0;
+$j = paypal_api('POST','/v2/checkout/orders', $body, $http, $err);
+if ($http !== 201 || !$j || empty($j['id'])) {
+  http_response_code(500);
+  echo json_encode(['error'=>'create_failed','detail'=>$err,'http'=>$http]);
+  exit;
 }
 
-pp_log(['create_failed'=>true,'http'=>$http,'err'=>$err,'res'=>$res]);
-http_response_code(200);
-echo json_encode(['ok'=>false,'error'=>'create_failed','http'=>$http,'debug'=>$err,'res'=>$res]);
+echo json_encode(['id'=>$j['id']]);
