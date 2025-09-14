@@ -3,16 +3,34 @@ require_once __DIR__.'/db.php';
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
+/* Datos del usuario */
 $st=$pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,api_key FROM users WHERE id=?");
-$st->execute([$uid]); $me=$st->fetch();
+$st->execute([$uid]); 
+$me=$st->fetch();
+if(!$me){ header('Location: logout.php'); exit; }
 
-$c=$pdo->prepare("SELECT COUNT(*) c FROM files WHERE user_id=?"); $c->execute([$uid]);
-$used=(int)$c->fetch()['c']; $remain=max(0,(int)$me['quota_limit']-$used);
+/* Conteo de archivos usados y espacio restante */
+$c=$pdo->prepare("SELECT COUNT(*) AS c FROM files WHERE user_id=?");
+$c->execute([$uid]);
+$used=(int)($c->fetch()['c'] ?? 0);
+$remain=max(0,(int)$me['quota_limit']-$used);
 
-// Índice (por si no existe) para que el buscador sea rápido
-$pdo->exec("CREATE INDEX IF NOT EXISTS files_userid_name ON files(user_id, name)");
+/* (MariaDB) Asegurar índice para búsquedas rápidas */
+try {
+  $ix = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+                       WHERE TABLE_SCHEMA = DATABASE()
+                         AND TABLE_NAME = 'files'
+                         AND INDEX_NAME  = 'files_userid_name'");
+  $ix->execute();
+  if ((int)$ix->fetchColumn() === 0) {
+    // name puede ser VARCHAR(191) o TEXT; por eso usamos prefijo (191) para máxima compatibilidad
+    $pdo->exec("ALTER TABLE files ADD INDEX files_userid_name (user_id, name(191))");
+  }
+} catch(Throwable $e){ /* silencioso */ }
 
-// Límite por plan
+/* Límite por plan (con fallback si no existen constantes) */
+if (!defined('SIZE_LIMIT_FREE_MB'))   define('SIZE_LIMIT_FREE_MB',   5);
+if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200); // Deluxe “pesado”
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 ?>
 <!doctype html><html lang="es"><head>
@@ -75,17 +93,21 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   <div class="card">
     <div class="topline">
       <div>
-        <div>Hola, <b><?=htmlspecialchars(trim($me['first_name'].' '.$me['last_name']))?></b></div>
+        <div>Hola, <b><?=htmlspecialchars(trim(($me['first_name']??'').' '.($me['last_name']??'')))?></b></div>
         <div style="margin-top:6px">
-          Estado: <?= ((int)$me['is_deluxe']===1)?'💎 <b>Deluxe</b>':'Estándar' ?> <?= $me['is_admin']?'<span class="bad">Admin</span>':'' ?>
+          Estado: <?= ((int)$me['is_deluxe']===1)?'💎 <b>Deluxe</b>':'Estándar' ?> <?= !empty($me['is_admin'])?'<span class="bad">Admin</span>':'' ?>
         </div>
       </div>
       <div><a href="logout.php">Salir</a></div>
     </div>
 
-    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px">
-      <span class="pill">API Key: <code id="apikey"><?=htmlspecialchars($me['api_key'])?></code></span>
-      <button class="pill grad" id="copyKey">Copiar API Key</button>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:center">
+      <span class="pill">
+        API Key:
+        <code id="apikey" data-full="<?=htmlspecialchars($me['api_key'])?>" data-show="0">••••••••••••••••••••••••</code>
+      </span>
+      <button class="pill grad" id="toggleKey" type="button">Ver</button>
+      <button class="pill grad" id="copyKey" type="button">Copiar API Key</button>
       <span class="pill grad">Disponibles: <b><?=$remain?></b></span>
       <span class="pill">Límite por archivo: <b><?=$maxMB?>MB</b></span>
     </div>
@@ -94,12 +116,14 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
       <p class="muted" style="margin:10px 0 0">
         Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo <b>(pago único $5)</b>.
       </p>
+    <?php else: ?>
+      <p class="muted" style="margin:10px 0 0">Tu plan <b>Deluxe</b> está activo. Disfruta subidas de hasta <b><?=SIZE_LIMIT_DELUXE_MB?>MB</b> por archivo.</p>
     <?php endif; ?>
 
     <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px">
       <a class="btn" href="list.php">📁 Ver todos mis archivos</a>
       <a class="btn" href="settings.php">👤 Perfil / Configuración</a>
-      <?php if($me['is_admin']): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
+      <?php if(!empty($me['is_admin'])): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
     </p>
   </div>
 
@@ -107,7 +131,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   <div class="row row2" style="margin-top:14px">
     <div class="card">
       <h3>Subir archivo</h3>
-      <?php if(!(int)$me['verified']): ?>
+      <?php if((int)$me['verified']!==1): ?>
         <p>❌ Debes <b>verificar tu correo</b> antes de subir archivos.</p>
       <?php else: ?>
         <form id="up" enctype="multipart/form-data">
@@ -157,7 +181,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
               const r = await fetch('upload.php', { method:'POST', body:new FormData(up) });
               if(!r.ok){
                 if(r.status === 413){
-                  msg(false, `<span>❌</span> Archivo demasiado grande (HTTP 413). Revisa <code>client_max_body_size</code> y <code>upload_max_filesize/post_max_size</code>.`);
+                  msg(false, `<span>❌</span> Archivo demasiado grande (HTTP 413). Revisa <code>client_max_body_size</code> en Nginx y <code>upload_max_filesize/post_max_size</code> en PHP.`);
                 }else{
                   const tx = await r.text();
                   msg(false, `<span>❌</span> Error del servidor (${r.status}). ${tx ? tx.replace(/</g,'&lt;') : ''}`);
@@ -171,13 +195,13 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 const url = j.file.url;
                 msg(true, `
                   <span>✅</span>
-                  <a class="url" href="${url}" target="_blank">${url}</a>
-                  <button type="button" class="btn btn-sm" data-url="${url}">Copiar URL</button>
+                  <a class="url" href="\${url}" target="_blank">\${url}</a>
+                  <button type="button" class="btn btn-sm" data-url="\${url}">Copiar URL</button>
                 `);
-                if (j.warn) msg(true, `<span>ℹ️</span> ${j.warn}`);
+                if (j.warn) msg(true, `<span>ℹ️</span> \${j.warn}`);
                 up.reset();
               } else {
-                msg(false, `<span>❌</span> ${j.error || 'Error'}${deluxeCTA}`);
+                msg(false, `<span>❌</span> \${j.error || 'Error'}${deluxeCTA}`);
               }
             } catch(e){
               msg(false, `<span>❌</span> Error de red. Revisa conexión o límites del proxy/WAF.`);
@@ -205,8 +229,8 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   </div>
 
   <?php
-    // --- PayPal: mostrar botones sólo si está configurado ---
-    $pp_cid  = setting_get('paypal_client_id','');   // Admin → Pagos
+    // Mostrar botones PayPal sólo si hay client ID en settings
+    $pp_cid  = setting_get('paypal_client_id','');
   ?>
 
   <?php if ($pp_cid): ?>
@@ -255,16 +279,13 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
             })();
           });
         }
-
         async function renderBtn(selector, plan){
           const cont = document.querySelector(selector);
           if (!cont) return;
           try{
             await waitForPayPal();
-
             paypal.Buttons({
               style: { layout:'vertical', shape:'pill', tagline:false },
-
               createOrder: async function() {
                 const r = await fetch('paypal_create_order.php', {
                   method: 'POST',
@@ -280,7 +301,6 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 if (!d.id) { alert('Respuesta inválida al crear la orden.'); throw new Error('missing order id'); }
                 return d.id;
               },
-
               onApprove: async function(data) {
                 if (!data?.orderID) { alert('Falta orderID para capturar.'); return; }
                 const r = await fetch('paypal_capture.php', {
@@ -298,7 +318,6 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                   alert('❌ Error al capturar: '+(d.error || ('HTTP '+r.status)));
                 }
               },
-
               onError: function(err){
                 console.error('PayPal onError:', err);
                 const msg = (err && (err.message || (err.toString && err.toString()))) || 'desconocido';
@@ -316,7 +335,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
         <?php if((int)$me['is_deluxe']!==1): ?>renderBtn('#pp-deluxe','DELUXE');<?php endif; ?>
       </script>
     </div>
-  <?php elseif ((int)$me['is_admin'] === 1): ?>
+  <?php elseif (!empty($me['is_admin'])): ?>
     <div class="card" style="margin-top:14px">
       <h3>Pagos (PayPal)</h3>
       <p class="muted">Configura PayPal en <a class="btn btn-sm ghost" href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
@@ -326,11 +345,18 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
 </div>
 
 <script>
-  // Copiar API Key
-  const copyBtn=document.getElementById('copyKey');
-  copyBtn?.addEventListener('click',async()=>{
-    const t=document.getElementById('apikey')?.innerText||'';
-    try{ await navigator.clipboard.writeText(t); copyBtn.textContent='¡Copiada!'; setTimeout(()=>copyBtn.textContent='Copiar API Key',1500);}catch(e){}
+  // Ver/Ocultar API Key + copiar
+  const keyCode = document.getElementById('apikey');
+  const toggleBtn = document.getElementById('toggleKey');
+  const copyBtn = document.getElementById('copyKey');
+  toggleBtn?.addEventListener('click', ()=>{
+    const showing = keyCode.dataset.show === '1';
+    if(!showing){ keyCode.textContent = keyCode.dataset.full; keyCode.dataset.show='1'; toggleBtn.textContent='Ocultar'; }
+    else{ keyCode.textContent = '••••••••••••••••••••••••'; keyCode.dataset.show='0'; toggleBtn.textContent='Ver'; }
+  });
+  copyBtn?.addEventListener('click', async ()=>{
+    const v = keyCode.dataset.full || '';
+    try{ await navigator.clipboard.writeText(v); copyBtn.textContent='¡Copiada!'; setTimeout(()=>copyBtn.textContent='Copiar API Key',1500);}catch(e){}
   });
 
   // ---------- Buscador rápido ----------
