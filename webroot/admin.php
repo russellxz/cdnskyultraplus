@@ -117,9 +117,9 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
 }
 
 /* === Endpoint GET ?action=user_list (buscador en tiempo real) ===
-   - Totalmente compatible con MariaDB/MySQL (sin COLLATE ni LIKE)
-   - Coincidencia por ID exacto, email, username, nombre, apellido y nombre completo
-   - Búsqueda insensible a mayúsculas usando LOWER + INSTR
+   - Compatible con MariaDB/MySQL sin COLLATE
+   - "Contiene" (case-insensitive) con INSTR(LOWER(...), ?)
+   - Soporta ID exacto, email, username, nombre, apellido y nombre completo
 */
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
@@ -127,40 +127,44 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
   $q = trim($qRaw);
 
   try {
-    // Si consultan por ID exacto (entero)
+    // Buscar por ID exacto si es todo dígitos
     if ($q !== '' && ctype_digit($q)) {
-      $st = $pdo->prepare("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                           FROM users WHERE id=? LIMIT 1");
+      $st = $pdo->prepare(
+        "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+         FROM users WHERE id=? LIMIT 1"
+      );
       $st->execute([(int)$q]);
       json_out(['ok'=>true,'items'=>$st->fetchAll(PDO::FETCH_ASSOC)]);
     }
 
     if ($q !== '') {
-      // Normaliza a minúsculas
-      $lower = function($s){ return function_exists('mb_strtolower') ? mb_strtolower($s,'UTF-8') : strtolower($s); };
-      $needle = $lower($q);
+      // Normaliza a minúsculas para comparación insensible a mayúsculas
+      $needle = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
 
-      // Contiene (case-insensitive) con INSTR(LOWER(col), :p) > 0
+      // OJO: placeholders posicionales (no nombrados repetidos)
       $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
               FROM users
-              WHERE INSTR(LOWER(email), :p) > 0
-                 OR INSTR(LOWER(username), :p) > 0
-                 OR INSTR(LOWER(first_name), :p) > 0
-                 OR INSTR(LOWER(last_name), :p) > 0
-                 OR INSTR(LOWER(CONCAT_WS(' ', first_name, last_name)), :p) > 0
+              WHERE INSTR(LOWER(email), ?) > 0
+                 OR INSTR(LOWER(username), ?) > 0
+                 OR INSTR(LOWER(first_name), ?) > 0
+                 OR INSTR(LOWER(last_name), ?) > 0
+                 OR INSTR(LOWER(CONCAT_WS(' ', first_name, last_name)), ?) > 0
               ORDER BY id DESC
               LIMIT 200";
       $st = $pdo->prepare($sql);
-      $st->execute([':p'=>$needle]);
+      $st->execute([$needle, $needle, $needle, $needle, $needle]);
     } else {
-      $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                         FROM users ORDER BY id DESC LIMIT 50");
+      $st = $pdo->query(
+        "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+         FROM users ORDER BY id DESC LIMIT 50"
+      );
     }
 
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
 
   } catch (Throwable $e) {
+    // Log para diagnosticar si vuelve a fallar
     error_log('ADMIN user_list error: '.$e->getMessage());
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
   }
