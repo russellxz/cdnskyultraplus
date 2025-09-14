@@ -6,7 +6,14 @@ if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 
-/* ================== Admin actual ================== */
+/* ========= Polyfills por compat ========= */
+if (!function_exists('str_starts_with')) {
+  function str_starts_with(string $haystack, string $needle): bool {
+    return $needle === '' || strpos($haystack, $needle) === 0;
+  }
+}
+
+/* ========= Admin actual ========= */
 try {
   $meSt = $pdo->prepare("SELECT * FROM users WHERE id=? LIMIT 1");
   $meSt->execute([$uid]);
@@ -14,7 +21,7 @@ try {
 } catch(Throwable $e){ $me = null; }
 if (!$me || (int)$me['is_admin'] !== 1) { http_response_code(403); exit('403'); }
 
-/* ================== Helpers ================== */
+/* ========= Helpers ========= */
 function json_out(array $a, int $code=200){
   http_response_code($code);
   header('Content-Type: application/json; charset=utf-8');
@@ -28,13 +35,11 @@ function bytes_fmt(int|float $b): string {
   return number_format($b, $b>=10?0:1).' '.$u[$i];
 }
 
-/* ================== Índices para búsqueda (idempotente) ==================
-   Creamos índices individuales para que MariaDB pueda usar Index Merge en OR.
-   Si ya existen, no pasa nada. */
-function ensure_index($pdo, string $table, string $index, string $definition): void {
+/* ========= (Opcional) comprobación silenciosa de índices =========
+   NO crea índices si no hay permisos; nunca rompe la página. */
+function try_ensure_index(PDO $pdo, string $table, string $index, string $definition): void {
   try{
-    $q = $pdo->prepare("SELECT COUNT(*)
-                        FROM INFORMATION_SCHEMA.STATISTICS
+    $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
                         WHERE TABLE_SCHEMA = DATABASE()
                           AND TABLE_NAME   = ?
                           AND INDEX_NAME   = ?");
@@ -42,14 +47,14 @@ function ensure_index($pdo, string $table, string $index, string $definition): v
     if ((int)$q->fetchColumn() === 0) {
       $pdo->exec("CREATE INDEX `$index` ON `$table` ($definition)");
     }
-  }catch(Throwable $e){/* silencioso */}
+  }catch(Throwable $e){ /* siempre silencioso */ }
 }
-ensure_index($pdo, 'users', 'idx_users_email',     'email');
-ensure_index($pdo, 'users', 'idx_users_username',  'username');
-ensure_index($pdo, 'users', 'idx_users_first',     'first_name');
-ensure_index($pdo, 'users', 'idx_users_last',      'last_name');
+try_ensure_index($pdo, 'users', 'idx_users_username',  'username');
+try_ensure_index($pdo, 'users', 'idx_users_email',     'email');
+try_ensure_index($pdo, 'users', 'idx_users_first',     'first_name');
+try_ensure_index($pdo, 'users', 'idx_users_last',      'last_name');
 
-/* ================== Métricas para monitor ================== */
+/* ========= Métricas ========= */
 function metric_cpu_percent(float $interval=0.2): float {
   $line = @file('/proc/stat')[0] ?? '';
   if (strpos($line,'cpu')!==0) return -1;
@@ -94,7 +99,7 @@ function metric_uptime(): string {
   return implode(' ', $out);
 }
 
-/* === Endpoint GET ?action=metrics === */
+/* === GET ?action=metrics === */
 if (isset($_GET['action']) && $_GET['action']==='metrics') {
   $uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : (__DIR__.'/uploads');
   $cpu  = metric_cpu_percent(0.2);
@@ -111,64 +116,67 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
   ]);
 }
 
-/* === Endpoint GET ?action=user_list (buscador en tiempo real) ===
-   - Compatible con MariaDB/MySQL
-   - Case-insensitive con COLLATE
-   - Escapa comodines del usuario para evitar sorpresas
-   - Soporta: ID exacto, email, username, nombre, apellido y nombre completo */
+/* === GET ?action=user_list (buscador en tiempo real) === */
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
   $qRaw = (string)($_GET['q'] ?? '');
   $q = trim($qRaw);
 
   try {
-    // Si consultan por ID exacto (entero), priorizamos por id
+    // Si es ID exacto
     if ($q !== '' && ctype_digit($q)) {
       $st = $pdo->prepare("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                           FROM users
-                           WHERE id = ?
-                           ORDER BY id DESC
-                           LIMIT 1");
+                           FROM users WHERE id=? LIMIT 1");
       $st->execute([(int)$q]);
-      $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-      json_out(['ok'=>true,'items'=>$rows]);
+      json_out(['ok'=>true,'items'=>$st->fetchAll(PDO::FETCH_ASSOC)]);
     }
 
     if ($q !== '') {
-      // Escapar comodines del usuario, pero mantenemos % envolventes para "contiene"
-      // -> evita que alguien inyecte %/_ para 'match todo'
       $inner = str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q);
       $like  = '%'.$inner.'%';
 
-      // Forzamos colación insensible a mayúsculas para todos los campos texto
-      $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-              FROM users
-              WHERE email      COLLATE utf8mb4_general_ci LIKE :q
-                 OR username   COLLATE utf8mb4_general_ci LIKE :q
-                 OR first_name COLLATE utf8mb4_general_ci LIKE :q
-                 OR last_name  COLLATE utf8mb4_general_ci LIKE :q
-                 OR CONCAT_WS(' ', first_name, last_name) COLLATE utf8mb4_general_ci LIKE :q
-              ORDER BY id DESC
-              LIMIT 200";
-      $st = $pdo->prepare($sql);
-      $st->execute([':q'=>$like]);
+      // 1) Intento rápido con COLLATE (MariaDB/MySQL moderno)
+      try {
+        $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+                FROM users
+                WHERE email      COLLATE utf8mb4_general_ci LIKE :q
+                   OR username   COLLATE utf8mb4_general_ci LIKE :q
+                   OR first_name COLLATE utf8mb4_general_ci LIKE :q
+                   OR last_name  COLLATE utf8mb4_general_ci LIKE :q
+                   OR CONCAT_WS(' ', first_name, last_name) COLLATE utf8mb4_general_ci LIKE :q
+                ORDER BY id DESC
+                LIMIT 200";
+        $st = $pdo->prepare($sql);
+        $st->execute([':q'=>$like]);
+      } catch (Throwable $e) {
+        // 2) Fallback universal (LOWER)
+        $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+                FROM users
+                WHERE LOWER(email)      LIKE LOWER(:q)
+                   OR LOWER(username)   LIKE LOWER(:q)
+                   OR LOWER(first_name) LIKE LOWER(:q)
+                   OR LOWER(last_name)  LIKE LOWER(:q)
+                   OR LOWER(CONCAT_WS(' ', first_name, last_name)) LIKE LOWER(:q)
+                ORDER BY id DESC
+                LIMIT 200";
+        $st = $pdo->prepare($sql);
+        $st->execute([':q'=>$like]);
+      }
     } else {
       $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                         FROM users
-                         ORDER BY id DESC
-                         LIMIT 50");
+                         FROM users ORDER BY id DESC LIMIT 50");
     }
+
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
 
   } catch(Throwable $e){
-    // Si quieres ver el detalle en logs:
     error_log('ADMIN user_list error: '.$e->getMessage());
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
   }
 }
 
-/* ======================= ACTIONS (POST) ======================= */
+/* ========= ACTIONS (POST) ========= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
 
@@ -260,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   exit;
 }
 
-/* ======================= SSR (fallback inicial) ======================= */
+/* ========= SSR (fallback inicial) ========= */
 $ipon = setting_get('ip_block_enabled','1') === '1';
 try{
   $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
