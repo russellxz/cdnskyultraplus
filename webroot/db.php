@@ -1,4 +1,5 @@
 <?php
+// db.php (MySQL/MariaDB)
 require_once __DIR__ . '/config.php';
 session_start();
 
@@ -24,24 +25,23 @@ try {
 
 /* ===========================
  *  Esquema (idempotente)
- *  Collation: utf8mb4_unicode_ci
  * =========================== */
 $ddl = <<<SQL
 CREATE TABLE IF NOT EXISTS users (
-  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  email         VARCHAR(191) NOT NULL UNIQUE,
-  username      VARCHAR(191) UNIQUE,
-  first_name    VARCHAR(100),
-  last_name     VARCHAR(100),
-  pass          VARCHAR(255) NOT NULL,
-  api_key       VARCHAR(191),
-  is_admin      TINYINT(1) DEFAULT 0,
-  is_deluxe     TINYINT(1) DEFAULT 0,
-  verified      TINYINT(1) DEFAULT 0,
-  verify_token  VARCHAR(191),
-  quota_limit   INT DEFAULT 50,
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email           VARCHAR(191) NOT NULL UNIQUE,
+  username        VARCHAR(191) UNIQUE,
+  first_name      VARCHAR(100),
+  last_name       VARCHAR(100),
+  pass            VARCHAR(255) NOT NULL,
+  api_key         VARCHAR(191),
+  is_admin        TINYINT(1) DEFAULT 0,
+  is_deluxe       TINYINT(1) DEFAULT 0,
+  verified        TINYINT(1) DEFAULT 0,
+  verify_token    VARCHAR(191),
+  quota_limit     INT DEFAULT 50,
   registration_ip VARCHAR(45),
-  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS files (
@@ -52,11 +52,11 @@ CREATE TABLE IF NOT EXISTS files (
   path        TEXT NOT NULL,
   size_bytes  BIGINT UNSIGNED DEFAULT 0,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX (user_id, name(191)),
+  INDEX idx_files_user_name (user_id, name(191)),
   CONSTRAINT fk_files_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Tabla settings clave/valor (usamos k/v para evitar palabra reservada)
+-- settings k/v (evita palabra reservada "key")
 CREATE TABLE IF NOT EXISTS settings (
   k VARCHAR(191) PRIMARY KEY,
   v TEXT
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
   CONSTRAINT fk_pr_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Pagos (one-off)
+-- Pagos one-off (PayPal)
 CREATE TABLE IF NOT EXISTS payments (
   id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id      INT UNSIGNED NOT NULL,
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   data_json   MEDIUMTEXT,
   issued_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
   paid_at     DATETIME NULL,
-  CONSTRAINT fk_inv_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_inv_user    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_inv_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 SQL;
@@ -125,7 +125,7 @@ function ensure_column(string $table, string $col, string $type): void {
 ensure_column('users', 'registration_ip', 'VARCHAR(45) NULL');
 
 /* ===========================
- *  Settings helpers (k/v)
+ *  Settings helpers (k/v) + compat
  * =========================== */
 function setting_get(string $key, $default = null) {
   global $pdo;
@@ -141,7 +141,6 @@ function setting_set(string $key, string $value): void {
   $st->execute([$key, $value]);
 }
 
-/* Compat wrappers para código viejo */
 function get_setting(string $name, string $default = ''): string {
   $v = setting_get($name, $default);
   return ($v === null) ? $default : (string)$v;
@@ -149,6 +148,9 @@ function get_setting(string $name, string $default = ''): string {
 function set_setting(string $name, string $value): void {
   setting_set($name, $value);
 }
+
+/* Defaults útiles si no existen */
+if (setting_get('invoice_prefix') === null) setting_set('invoice_prefix','INV-');
 
 /* ===========================
  *  SMTP helpers (lee de settings con fallback config.php)
@@ -173,7 +175,7 @@ function smtp_set(array $cfg): void {
 }
 
 /* ===========================
- *  Pagos / Facturas utilities
+ *  Pagos / Facturas utilities (PayPal-ready)
  * =========================== */
 function payment_upsert(int $user_id, string $order_id, string $plan_code, float $amount_usd, string $status, array $raw = []): void {
   global $pdo;
@@ -213,7 +215,15 @@ function is_admin(int $uid): bool {
   return (int)$st->fetchColumn() === 1;
 }
 
-/* Flags iniciales */
+/* Flag de seguridad por defecto */
 if (setting_get('ip_block_enabled') === null) {
   setting_set('ip_block_enabled', '1');
+}
+
+/* Carpeta de uploads */
+if (defined('UPLOAD_BASE')) {
+  if (!is_dir(UPLOAD_BASE)) { @mkdir(UPLOAD_BASE, 0775, true); }
+} else {
+  $uploadsDir = __DIR__ . '/uploads';
+  if (!is_dir($uploadsDir)) { @mkdir($uploadsDir, 0775, true); }
 }
