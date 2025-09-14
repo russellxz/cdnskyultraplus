@@ -6,7 +6,7 @@ if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 
-// Traer mi usuario (admin)
+/* ================== Admin actual ================== */
 try {
   $meSt = $pdo->prepare("SELECT * FROM users WHERE id=? LIMIT 1");
   $meSt->execute([$uid]);
@@ -14,10 +14,11 @@ try {
 } catch(Throwable $e){ $me = null; }
 if (!$me || (int)$me['is_admin'] !== 1) { http_response_code(403); exit('403'); }
 
-/* ----------------------- Helpers ----------------------- */
+/* ================== Helpers ================== */
 function json_out(array $a, int $code=200){
   http_response_code($code);
   header('Content-Type: application/json; charset=utf-8');
+  header('Cache-Control: no-store');
   echo json_encode($a, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
   exit;
 }
@@ -27,7 +28,28 @@ function bytes_fmt(int|float $b): string {
   return number_format($b, $b>=10?0:1).' '.$u[$i];
 }
 
-/* --------- Métricas del servidor (para el monitor en tiempo real) --------- */
+/* ================== Índices para búsqueda (idempotente) ==================
+   Creamos índices individuales para que MariaDB pueda usar Index Merge en OR.
+   Si ya existen, no pasa nada. */
+function ensure_index($pdo, string $table, string $index, string $definition): void {
+  try{
+    $q = $pdo->prepare("SELECT COUNT(*)
+                        FROM INFORMATION_SCHEMA.STATISTICS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME   = ?
+                          AND INDEX_NAME   = ?");
+    $q->execute([$table,$index]);
+    if ((int)$q->fetchColumn() === 0) {
+      $pdo->exec("CREATE INDEX `$index` ON `$table` ($definition)");
+    }
+  }catch(Throwable $e){/* silencioso */}
+}
+ensure_index($pdo, 'users', 'idx_users_email',     'email');
+ensure_index($pdo, 'users', 'idx_users_username',  'username');
+ensure_index($pdo, 'users', 'idx_users_first',     'first_name');
+ensure_index($pdo, 'users', 'idx_users_last',      'last_name');
+
+/* ================== Métricas para monitor ================== */
 function metric_cpu_percent(float $interval=0.2): float {
   $line = @file('/proc/stat')[0] ?? '';
   if (strpos($line,'cpu')!==0) return -1;
@@ -89,34 +111,59 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
   ]);
 }
 
-/* === Endpoint GET ?action=user_list (buscador en tiempo real) === */
+/* === Endpoint GET ?action=user_list (buscador en tiempo real) ===
+   - Compatible con MariaDB/MySQL
+   - Case-insensitive con COLLATE
+   - Escapa comodines del usuario para evitar sorpresas
+   - Soporta: ID exacto, email, username, nombre, apellido y nombre completo */
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
-  $q = trim($_GET['q'] ?? '');
+  $qRaw = (string)($_GET['q'] ?? '');
+  $q = trim($qRaw);
+
   try {
+    // Si consultan por ID exacto (entero), priorizamos por id
+    if ($q !== '' && ctype_digit($q)) {
+      $st = $pdo->prepare("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+                           FROM users
+                           WHERE id = ?
+                           ORDER BY id DESC
+                           LIMIT 1");
+      $st->execute([(int)$q]);
+      $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+      json_out(['ok'=>true,'items'=>$rows]);
+    }
+
     if ($q !== '') {
-      // LIKE insensible a mayúsculas por colación; escapamos comodines % y _
-      $like = '%'.str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q).'%';
+      // Escapar comodines del usuario, pero mantenemos % envolventes para "contiene"
+      // -> evita que alguien inyecte %/_ para 'match todo'
+      $inner = str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q);
+      $like  = '%'.$inner.'%';
+
+      // Forzamos colación insensible a mayúsculas para todos los campos texto
       $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
               FROM users
-              WHERE email      LIKE :e ESCAPE '\\'
-                 OR username   LIKE :u ESCAPE '\\'
-                 OR first_name LIKE :f ESCAPE '\\'
-                 OR last_name  LIKE :l ESCAPE '\\'
-                 OR CONCAT_WS(' ', first_name, last_name) LIKE :fl ESCAPE '\\'
+              WHERE email      COLLATE utf8mb4_general_ci LIKE :q
+                 OR username   COLLATE utf8mb4_general_ci LIKE :q
+                 OR first_name COLLATE utf8mb4_general_ci LIKE :q
+                 OR last_name  COLLATE utf8mb4_general_ci LIKE :q
+                 OR CONCAT_WS(' ', first_name, last_name) COLLATE utf8mb4_general_ci LIKE :q
               ORDER BY id DESC
               LIMIT 200";
       $st = $pdo->prepare($sql);
-      $st->execute([
-        ':e'=>$like, ':u'=>$like, ':f'=>$like, ':l'=>$like, ':fl'=>$like
-      ]);
+      $st->execute([':q'=>$like]);
     } else {
       $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                         FROM users ORDER BY id DESC LIMIT 50");
+                         FROM users
+                         ORDER BY id DESC
+                         LIMIT 50");
     }
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
+
   } catch(Throwable $e){
+    // Si quieres ver el detalle en logs:
+    error_log('ADMIN user_list error: '.$e->getMessage());
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
   }
 }
@@ -213,7 +260,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   exit;
 }
 
-/* ======================= DATA (SSR inicial como fallback) ======================= */
+/* ======================= SSR (fallback inicial) ======================= */
 $ipon = setting_get('ip_block_enabled','1') === '1';
 try{
   $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
@@ -499,7 +546,6 @@ async function runSearch(showLoading=true){
     tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
     if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
   }catch(e){
-    // Ignorar abortos para que no aparezca el mensaje al teclear rápido
     if (e.name !== 'AbortError') {
       if (hint) hint.textContent='Error al buscar.';
     }
