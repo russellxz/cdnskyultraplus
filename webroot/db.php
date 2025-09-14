@@ -1,128 +1,147 @@
 <?php
-// db.php
 require_once __DIR__ . '/config.php';
 session_start();
 
-/* === Conexión SQLite === */
-$pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite', null, null, [
+/* ===========================
+ *  Conexión PDO (MySQL/MariaDB)
+ * =========================== */
+$dsn = 'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
+
+$options = [
   PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
   PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
   PDO::ATTR_EMULATE_PREPARES   => false,
-]);
-$pdo->exec('PRAGMA foreign_keys = ON');
-$pdo->exec('PRAGMA journal_mode = WAL');
-$pdo->exec('PRAGMA busy_timeout = 30000');
+];
 
-/* === Tablas base (idempotentes) === */
-$pdo->exec("
+try {
+  $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+  // Modo estricto recomendado
+  $pdo->exec("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
+} catch (Throwable $e) {
+  http_response_code(500);
+  exit('DB connection failed');
+}
+
+/* ===========================
+ *  Esquema (idempotente)
+ *  Collation: utf8mb4_unicode_ci
+ * =========================== */
+$ddl = <<<SQL
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT UNIQUE NOT NULL,
-  username TEXT UNIQUE,
-  first_name TEXT,
-  last_name  TEXT,
-  pass TEXT NOT NULL,
-  api_key TEXT,
-  is_admin   INTEGER DEFAULT 0,
-  is_deluxe  INTEGER DEFAULT 0,
-  verified   INTEGER DEFAULT 0,
-  verify_token TEXT,
-  quota_limit INTEGER DEFAULT 50,
-  registration_ip TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email         VARCHAR(191) NOT NULL UNIQUE,
+  username      VARCHAR(191) UNIQUE,
+  first_name    VARCHAR(100),
+  last_name     VARCHAR(100),
+  pass          VARCHAR(255) NOT NULL,
+  api_key       VARCHAR(191),
+  is_admin      TINYINT(1) DEFAULT 0,
+  is_deluxe     TINYINT(1) DEFAULT 0,
+  verified      TINYINT(1) DEFAULT 0,
+  verify_token  VARCHAR(191),
+  quota_limit   INT DEFAULT 50,
+  registration_ip VARCHAR(45),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS files (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  url  TEXT NOT NULL,
-  path TEXT NOT NULL,
-  size_bytes INTEGER DEFAULT 0,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id     INT UNSIGNED NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  url         TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  size_bytes  BIGINT UNSIGNED DEFAULT 0,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX (user_id, name(191)),
+  CONSTRAINT fk_files_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Nota: usamos \"key\" entre comillas para evitar choques con la palabra clave
+-- Tabla settings clave/valor (usamos k/v para evitar palabra reservada)
 CREATE TABLE IF NOT EXISTS settings (
-  \"key\" TEXT PRIMARY KEY,
-  value  TEXT
-);
+  k VARCHAR(191) PRIMARY KEY,
+  v TEXT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS password_resets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  token TEXT UNIQUE NOT NULL,
-  expires_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  token      VARCHAR(191) UNIQUE NOT NULL,
+  expires_at INT UNSIGNED NOT NULL,
+  CONSTRAINT fk_pr_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- === Nuevas tablas para pagos e invoices ===
+-- Pagos (one-off)
 CREATE TABLE IF NOT EXISTS payments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id     INTEGER NOT NULL,
-  order_id    TEXT UNIQUE NOT NULL,           -- ID de la orden del proveedor (p.ej. PayPal)
-  provider    TEXT DEFAULT 'paypal',
-  plan_code   TEXT NOT NULL,                  -- plus50 | plus120 | plus250 | (más tarde deluxe_sub)
-  amount_usd  REAL NOT NULL,
-  currency    TEXT DEFAULT 'USD',
-  status      TEXT NOT NULL,                  -- created | completed | failed | refunded
-  payer_email TEXT,
-  raw_json    TEXT,                           -- respuesta completa del proveedor
-  created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
-  captured_at TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id      INT UNSIGNED NOT NULL,
+  order_id     VARCHAR(191) NOT NULL UNIQUE,
+  provider     VARCHAR(50) DEFAULT 'paypal',
+  plan_code    VARCHAR(50) NOT NULL,    -- PLUS50 | PLUS120 | PLUS250 | DELUXE_LIFE
+  amount_usd   DECIMAL(10,2) NOT NULL,
+  currency     VARCHAR(10) DEFAULT 'USD',
+  status       VARCHAR(50) NOT NULL,    -- created | completed | failed | refunded
+  payer_email  VARCHAR(191),
+  raw_json     MEDIUMTEXT,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  captured_at  DATETIME NULL,
+  CONSTRAINT fk_pay_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Facturas
 CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  number     TEXT UNIQUE NOT NULL,            -- INV-YYYYMM-0001
-  user_id    INTEGER NOT NULL,
-  payment_id INTEGER,                         -- null si es factura manual
-  title      TEXT NOT NULL,                   -- concepto
-  amount_usd REAL NOT NULL,
-  currency   TEXT DEFAULT 'USD',
-  status     TEXT NOT NULL,                   -- issued | paid | refunded | void
-  pdf_path   TEXT,
-  data_json  TEXT,
-  issued_at  TEXT DEFAULT CURRENT_TIMESTAMP,
-  paid_at    TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
-);
-");
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  number      VARCHAR(191) NOT NULL UNIQUE,  -- INV-YYYYMM-0001
+  user_id     INT UNSIGNED NOT NULL,
+  payment_id  INT UNSIGNED NULL,
+  title       VARCHAR(191) NOT NULL,
+  amount_usd  DECIMAL(10,2) NOT NULL,
+  currency    VARCHAR(10) DEFAULT 'USD',
+  status      VARCHAR(50) NOT NULL,          -- issued | paid | refunded | void
+  pdf_path    TEXT,
+  data_json   MEDIUMTEXT,
+  issued_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  paid_at     DATETIME NULL,
+  CONSTRAINT fk_inv_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_inv_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+SQL;
 
-/* === Migrador sencillo: añade columnas si faltan === */
-function ensure_column($table, $col, $type) {
+foreach (array_filter(array_map('trim', explode(';', $ddl))) as $stmt) {
+  if ($stmt !== '') $pdo->exec($stmt);
+}
+
+/* ===========================
+ *  Migrador simple: añade columnas si faltan
+ * =========================== */
+function ensure_column(string $table, string $col, string $type): void {
   global $pdo;
-  $st = $pdo->prepare("PRAGMA table_info($table)");
-  $st->execute();
-  $cols = array_column($st->fetchAll(), 'name');
-  if (!in_array($col, $cols, true)) {
-    $pdo->exec("ALTER TABLE $table ADD COLUMN $col $type");
+  $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+  $q->execute([$table, $col]);
+  if ((int)$q->fetchColumn() === 0) {
+    $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$col` $type");
   }
 }
-ensure_column('users', 'username',       'TEXT UNIQUE');
-ensure_column('users', 'first_name',     'TEXT');
-ensure_column('users', 'last_name',      'TEXT');
-ensure_column('users', 'registration_ip','TEXT');
+ensure_column('users', 'registration_ip', 'VARCHAR(45) NULL');
 
-/* === Helpers de settings (clave/valor) === */
+/* ===========================
+ *  Settings helpers (k/v)
+ * =========================== */
 function setting_get(string $key, $default = null) {
   global $pdo;
-  $st = $pdo->prepare('SELECT value FROM settings WHERE "key"=? LIMIT 1');
+  $st = $pdo->prepare('SELECT v FROM settings WHERE k = ? LIMIT 1');
   $st->execute([$key]);
   $v = $st->fetchColumn();
   return ($v === false) ? $default : $v;
 }
 function setting_set(string $key, string $value): void {
   global $pdo;
-  $st = $pdo->prepare('INSERT INTO settings("key",value) VALUES(?,?)
-                       ON CONFLICT("key") DO UPDATE SET value=excluded.value');
+  $st = $pdo->prepare('INSERT INTO settings(k, v) VALUES(?,?)
+                       ON DUPLICATE KEY UPDATE v = VALUES(v)');
   $st->execute([$key, $value]);
 }
 
-/* === Wrappers compatibles para código antiguo (admin.php, etc.) === */
+/* Compat wrappers para código viejo */
 function get_setting(string $name, string $default = ''): string {
   $v = setting_get($name, $default);
   return ($v === null) ? $default : (string)$v;
@@ -131,7 +150,9 @@ function set_setting(string $name, string $value): void {
   setting_set($name, $value);
 }
 
-/* === SMTP desde settings (con fallback a config.php) === */
+/* ===========================
+ *  SMTP helpers (lee de settings con fallback config.php)
+ * =========================== */
 function smtp_get(): array {
   return [
     'host' => setting_get('smtp_host', defined('SMTP_HOST') ? SMTP_HOST : ''),
@@ -151,53 +172,40 @@ function smtp_set(array $cfg): void {
   set_setting('smtp_name', (string)$cfg['name']);
 }
 
-/* === Pagos / Facturas: utilidades (para próximos pasos PayPal) === */
-/** Inserta o actualiza un pago por order_id (idempotente). */
+/* ===========================
+ *  Pagos / Facturas utilities
+ * =========================== */
 function payment_upsert(int $user_id, string $order_id, string $plan_code, float $amount_usd, string $status, array $raw = []): void {
   global $pdo;
-  $pdo->prepare("
-    INSERT INTO payments(user_id,order_id,plan_code,amount_usd,status,raw_json)
-    VALUES(?,?,?,?,?,?)
-    ON CONFLICT(order_id) DO UPDATE SET
-      status      = excluded.status,
-      raw_json    = excluded.raw_json,
-      captured_at = CASE WHEN excluded.status='completed' THEN CURRENT_TIMESTAMP ELSE payments.captured_at END
-  ")->execute([$user_id, $order_id, $plan_code, $amount_usd, $status, json_encode($raw)]);
+  $st = $pdo->prepare("INSERT INTO payments(user_id,order_id,plan_code,amount_usd,status,raw_json)
+                       VALUES(?,?,?,?,?,?)
+                       ON DUPLICATE KEY UPDATE
+                         status = VALUES(status),
+                         raw_json = VALUES(raw_json),
+                         captured_at = CASE WHEN VALUES(status)='completed' THEN CURRENT_TIMESTAMP ELSE captured_at END");
+  $st->execute([$user_id, $order_id, $plan_code, $amount_usd, $status, json_encode($raw)]);
 }
 
-/** Genera número de factura tipo INV-YYYYMM-0001. */
 function invoice_next_number(): string {
   $seq = (int) setting_get('invoice_seq', '0') + 1;
   $ym  = date('Ym');
-  $num = sprintf('INV-%s-%04d', $ym, $seq);
+  $num = sprintf('%s%s-%04d', setting_get('invoice_prefix','INV-'), $ym, $seq);
   setting_set('invoice_seq', (string)$seq);
   return $num;
 }
 
-/** Crea una factura (devuelve ID). */
-function invoice_create(int $user_id, ?int $payment_id, string $title, float $amount_usd, string $currency = 'USD', string $status='issued', array $data = []): int {
+function invoice_create(int $user_id, ?int $payment_id, string $title, float $amount_usd, string $currency='USD', string $status='issued', array $data=[]): int {
   global $pdo;
   $number = invoice_next_number();
-  $pdo->prepare("
-    INSERT INTO invoices(number,user_id,payment_id,title,amount_usd,currency,status,data_json)
-    VALUES(?,?,?,?,?,?,?,?)
-  ")->execute([$number,$user_id,$payment_id,$title,$amount_usd,$currency,$status,json_encode($data)]);
+  $st = $pdo->prepare("INSERT INTO invoices(number,user_id,payment_id,title,amount_usd,currency,status,data_json)
+                       VALUES(?,?,?,?,?,?,?,?)");
+  $st->execute([$number,$user_id,$payment_id,$title,$amount_usd,$currency,$status,json_encode($data)]);
   return (int)$pdo->lastInsertId();
 }
 
-/* === Flags iniciales === */
-/* Bloqueo por IP: ON por defecto si aún no existe */
-if (setting_get('ip_block_enabled') === null) {
-  setting_set('ip_block_enabled', '1');
-}
-
-/* === Utilidades varias usadas en otros scripts === */
-if (!function_exists('rand_key')) {
-  // Por si no está en config.php
-  function rand_key(int $len = 40): string { return bin2hex(random_bytes((int)($len/2))); }
-}
-
-/** ¿Usuario admin? */
+/* ===========================
+ *  Otras utilidades
+ * =========================== */
 function is_admin(int $uid): bool {
   global $pdo;
   $st = $pdo->prepare("SELECT is_admin FROM users WHERE id=? LIMIT 1");
@@ -205,35 +213,7 @@ function is_admin(int $uid): bool {
   return (int)$st->fetchColumn() === 1;
 }
 
-/* === Usuario root admin por primera vez === */
-if (!defined('ROOT_ADMIN_EMAIL')) {
-  define('ROOT_ADMIN_EMAIL', 'yemilpty1998@gmail.com');
-}
-if (!defined('ROOT_ADMIN_PASSWORD')) {
-  define('ROOT_ADMIN_PASSWORD', 'Flowpty1998@'); // cámbialo luego desde el panel
-}
-
-$st = $pdo->prepare("SELECT id FROM users WHERE email=? LIMIT 1");
-$st->execute([ROOT_ADMIN_EMAIL]);
-if (!$st->fetch()) {
-  $pdo->prepare("
-    INSERT INTO users(email,username,first_name,last_name,pass,api_key,is_admin,is_deluxe,verified,quota_limit)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
-  ")->execute([
-    ROOT_ADMIN_EMAIL,
-    'rootadmin',
-    'Root', 'Admin',
-    password_hash(ROOT_ADMIN_PASSWORD, PASSWORD_DEFAULT),
-    rand_key(40),
-    1, // is_admin
-    0, // is_deluxe
-    1, // verified
-    999999
-  ]);
-}
-
-/* === Carpeta de uploads (si la necesitas central) === */
-$uploadsDir = __DIR__ . '/uploads';
-if (!is_dir($uploadsDir)) {
-  @mkdir($uploadsDir, 0775, true);
+/* Flags iniciales */
+if (setting_get('ip_block_enabled') === null) {
+  setting_set('ip_block_enabled', '1');
 }
