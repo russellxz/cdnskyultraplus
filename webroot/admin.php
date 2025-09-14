@@ -91,26 +91,24 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
 
 /* === Endpoint GET ?action=user_list (buscador en tiempo real) === */
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
+  header('Cache-Control: no-store');
   $q = trim($_GET['q'] ?? '');
   try {
     if ($q !== '') {
-      // LIKE con escape de comodines y case-insensitive (compatible con MariaDB)
-      $like   = '%'.str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q).'%';
-      $qlower = function_exists('mb_strtolower') ? mb_strtolower($like, 'UTF-8') : strtolower($like);
+      // LIKE insensible a mayúsculas por colación; escapamos comodines % y _
+      $like = '%'.str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q).'%';
       $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
               FROM users
-              WHERE LOWER(email)      LIKE :q1 ESCAPE '\\'
-                 OR LOWER(username)   LIKE :q2 ESCAPE '\\'
-                 OR LOWER(first_name) LIKE :q3 ESCAPE '\\'
-                 OR LOWER(last_name)  LIKE :q4 ESCAPE '\\'
+              WHERE email      LIKE :e ESCAPE '\\'
+                 OR username   LIKE :u ESCAPE '\\'
+                 OR first_name LIKE :f ESCAPE '\\'
+                 OR last_name  LIKE :l ESCAPE '\\'
+                 OR CONCAT_WS(' ', first_name, last_name) LIKE :fl ESCAPE '\\'
               ORDER BY id DESC
               LIMIT 200";
       $st = $pdo->prepare($sql);
       $st->execute([
-        ':q1'=>$qlower,
-        ':q2'=>$qlower,
-        ':q3'=>$qlower,
-        ':q4'=>$qlower
+        ':e'=>$like, ':u'=>$like, ':f'=>$like, ':l'=>$like, ':fl'=>$like
       ]);
     } else {
       $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
@@ -489,7 +487,11 @@ async function runSearch(showLoading=true){
   if (ctl) ctl.abort(); ctl = new AbortController();
   try{
     if (showLoading && hint) hint.textContent='Buscando…';
-    const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {signal: ctl.signal, cache:'no-store'});
+    const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {
+      signal: ctl.signal,
+      cache:'no-store',
+      headers:{'Accept':'application/json'}
+    });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error||'Error en búsqueda');
     const items = j.items||[];
@@ -497,7 +499,10 @@ async function runSearch(showLoading=true){
     tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
     if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
   }catch(e){
-    if (hint) hint.textContent='Error al buscar.';
+    // Ignorar abortos para que no aparezca el mensaje al teclear rápido
+    if (e.name !== 'AbortError') {
+      if (hint) hint.textContent='Error al buscar.';
+    }
   }
 }
 function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
