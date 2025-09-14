@@ -10,6 +10,12 @@ if (!$me) { header('Location: logout.php'); exit; }
 
 $isDeluxe = (int)($me['is_deluxe'] ?? 0) === 1;
 $apiKey   = (string)($me['api_key'] ?? '');
+
+/* flashes */
+if (session_status() === PHP_SESSION_NONE) session_start();
+$flash_ok  = $_SESSION['flash_ok']  ?? '';
+$flash_err = $_SESSION['flash_err'] ?? '';
+unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
 ?>
 <!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -30,6 +36,9 @@ $apiKey   = (string)($me['api_key'] ?? '');
  .toggle{position:absolute;right:8px;top:8px;height:32px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#eaf2ff;cursor:pointer}
  .hint{color:#9fb0c9;font-size:13px;margin-top:6px}
  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+ .alert{padding:10px;border-radius:10px;margin-bottom:10px}
+ .ok{background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35)}
+ .err{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.35)}
 </style>
 </head><body><div class="wrap">
   <h2>⚙️ Configuración de perfil</h2>
@@ -37,6 +46,9 @@ $apiKey   = (string)($me['api_key'] ?? '');
     <a class="btn" href="profile.php">⬅️ Volver al panel</a>
     <a class="btn" href="list.php">📁 Ver mis archivos</a>
   </div>
+
+  <?php if($flash_ok): ?><div class="alert ok"><?=htmlspecialchars($flash_ok)?></div><?php endif; ?>
+  <?php if($flash_err): ?><div class="alert err"><?=htmlspecialchars($flash_err)?></div><?php endif; ?>
 
   <div class="card">
     <form id="profileForm" method="post" action="profile_save.php" onsubmit="return validateForm()">
@@ -56,23 +68,27 @@ $apiKey   = (string)($me['api_key'] ?? '');
 
         <hr style="border-color:#334155;margin:12px 0;width:100%">
 
-        <?php if ($isDeluxe): ?>
-          <div style="width:100%">
-            <label>API Key (solo Deluxe puede editarla)</label>
-            <div class="row" style="grid-template-columns:1fr auto auto auto">
-              <div class="field">
-                <input class="input" id="api_key" name="api_key"
-                       value="<?=htmlspecialchars($apiKey)?>" type="password" autocomplete="off">
-                <button class="toggle" type="button" id="showApi">Ver</button>
-              </div>
-              <button class="btn ghost" type="button" id="genApi">Generar</button>
-              <button class="btn ghost" type="button" id="copyApi">Copiar</button>
+        <!-- API KEY solo editable si es Deluxe -->
+        <div style="width:100%">
+          <label>API Key <?= $isDeluxe ? '(editable)' : '(solo lectura — activa Deluxe para editar)' ?></label>
+          <div class="row" style="grid-template-columns:1fr auto auto">
+            <div class="field">
+              <input class="input" id="api_key" name="api_key"
+                     value="<?=htmlspecialchars($apiKey)?>" type="password" autocomplete="off"
+                     <?= $isDeluxe ? '' : 'readonly' ?>>
+              <button class="toggle" type="button" id="showApi">Ver</button>
             </div>
-            <div class="hint">Si cambias tu API key, las integraciones con la clave anterior dejarán de funcionar. Asegúrate de actualizar tus bots/scripts.</div>
+            <button class="btn ghost" type="button" id="copyApi">Copiar</button>
+            <button class="btn" type="submit">Guardar</button>
           </div>
-        <?php else: ?>
-          <div class="hint" style="width:100%">Para poder editar tu API Key, primero activa el plan <b>Deluxe</b>.</div>
-        <?php endif; ?>
+          <div class="hint">
+            La API key debe tener entre 6 y 64 caracteres y sólo puede usar: letras, números, guion y guion-bajo
+            (<code>A-Za-z0-9_-</code>). Cambiarla invalidará la anterior.
+          </div>
+          <?php if(!$isDeluxe): ?>
+            <div class="hint">Para poder editar tu API Key, primero activa el plan <b>Deluxe</b>.</div>
+          <?php endif; ?>
+        </div>
 
         <hr style="border-color:#334155;margin:12px 0;width:100%">
 
@@ -103,7 +119,7 @@ $apiKey   = (string)($me['api_key'] ?? '');
 </div>
 
 <script>
-  // ----- Toggle ver/ocultar contraseñas -----
+  // Toggle ver/ocultar inputs con data-target
   document.querySelectorAll('.toggle[data-target]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.getAttribute('data-target');
@@ -114,32 +130,32 @@ $apiKey   = (string)($me['api_key'] ?? '');
     });
   });
 
-  // API key: ver/ocultar / generar / copiar (solo si existe)
+  // API key: ver/ocultar / copiar
   const apiI = document.getElementById('api_key');
   const showApi = document.getElementById('showApi');
-  const genApi = document.getElementById('genApi');
   const copyApi = document.getElementById('copyApi');
 
   showApi?.addEventListener('click', ()=>{
     if (apiI.type === 'password'){ apiI.type='text'; showApi.textContent='Ocultar'; }
     else { apiI.type='password'; showApi.textContent='Ver'; }
   });
-  genApi?.addEventListener('click', ()=>{
-    apiI.value = rndKey(40);
-  });
   copyApi?.addEventListener('click', async ()=>{
     try { await navigator.clipboard.writeText(apiI.value||''); copyApi.textContent='¡Copiada!'; setTimeout(()=>copyApi.textContent='Copiar',1200); }
     catch {}
   });
-  function rndKey(len=40){ const c='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=c[Math.floor(Math.random()*c.length)]; return o; }
 
-  // Validación en el cliente antes de enviar
+  // Validación en cliente (API key si es Deluxe + cambio de contraseña)
   function validateForm(){
+    const isDeluxe = <?= $isDeluxe ? 'true' : 'false' ?>;
+    const api = (apiI?.value||'').trim();
+    if (isDeluxe) {
+      if (api.length < 6) { alert('La API key debe tener al menos 6 caracteres.'); apiI.focus(); return false; }
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(api)) { alert('La API key sólo puede usar A-Z, a-z, 0-9, - y _. Máx. 64.'); apiI.focus(); return false; }
+    }
+
     const cur = document.getElementById('current');
     const n1  = document.getElementById('new');
     const n2  = document.getElementById('new2');
-
-    // Si quieren cambiar contraseña, deben: poner actual, nueva (>=6) e igualar confirmación
     const wantsChange = (n1.value.trim() !== '' || n2.value.trim() !== '');
     if (wantsChange) {
       if (cur.value.trim() === '') { alert('Debes escribir tu contraseña actual.'); cur.focus(); return false; }
