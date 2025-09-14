@@ -1,50 +1,64 @@
 <?php
+/* ===========================
+ *  CONFIGURACIÓN PÚBLICA
+ * =========================== */
+
 // URL pública (sin slash final)
 const BASE_URL = 'https://cdn.skyultraplus.com';
 
-// WhatsApp (contacto)
-const WHATSAPP_URL = 'https://wa.me/15167096032';
+// WhatsApp (contacto) — opcional
+const WHATSAPP_URL = 'https://wa.me/00000000000';
 
-// Precios (si los usas en otros lados)
-const PRICE_USD = 1.37; // referencia
+// Precios de referencia
+const PRICE_USD = 1.37;       // recargas
+const PRICE_DELUXE_LIFETIME = 5.00; // Deluxe de por vida
 
-// NO mostrar planes en el login (queda vacío a propósito)
+// No mostrar planes en el login
 const PLANS_TEXT = '';
 
 // Límites de subida (MB)
-const SIZE_LIMIT_FREE_MB   = 5;    // cuenta normal
-const SIZE_LIMIT_DELUXE_MB = 100;  // cuenta deluxe
+const SIZE_LIMIT_FREE_MB    = 5;    // cuenta normal
+const SIZE_LIMIT_DELUXE_MB  = 100;  // cuenta deluxe
 
-// SMTP por defecto (pueden sobreescribirse desde Admin)
-const SMTP_HOST = 'smtp.hostinger.com';
+// SMTP de ejemplo (seguro para repos públicos)
+const SMTP_HOST = 'smtp.example.com';
 const SMTP_PORT = 587;
-const SMTP_USER = 'ventas@skyultraplus.com';
-const SMTP_PASS = 'Flowpty1998@';
-const SMTP_FROM = 'ventas@skyultraplus.com';
-const SMTP_FROM_NAME = 'Skyultraplus';
+const SMTP_USER = 'no-reply@example.com';
+const SMTP_PASS = 'cámbiame';
+const SMTP_FROM = 'no-reply@example.com';
+const SMTP_FROM_NAME = 'SkyUltraPlus (Demo)';
 
-// Alias para mail.php
+// Alias para mail.php (si existiera)
 const MAIL_FROM = SMTP_FROM;
 const MAIL_FROM_NAME = SMTP_FROM_NAME;
 
-// Admin raíz protegido (no se puede eliminar/degradar)
-const ROOT_ADMIN_EMAIL = 'lasukisky@gmail.com';
+/* ===========================
+ *  BASE DE DATOS: MySQL/MariaDB
+ *  (sin .env; ajusta estos valores en producción)
+ * =========================== */
+const DB_HOST    = '127.0.0.1';
+const DB_PORT    = 3306;
+const DB_NAME    = 'cdn_skyultra';
+const DB_USER    = 'cdn_user';
+const DB_PASS    = 'superseguro';
+const DB_CHARSET = 'utf8mb4';
 
-// Generador de claves
+// Carpeta de almacenamiento (uploads)
+const UPLOAD_BASE = __DIR__ . '/uploads';
+if (!is_dir(UPLOAD_BASE)) {
+  @mkdir(UPLOAD_BASE, 0775, true);
+}
+
+/* ===========================
+ *  Helpers genéricos
+ * =========================== */
 function rand_key(int $len = 40): string {
-  $n = max(16, $len); // por seguridad, mínimo 16
+  $n = max(16, $len);
   return bin2hex(random_bytes(intval($n/2)));
 }
 
-// Sanitiza etiqueta (nombre “humano” del archivo)
 function clean_label(string $s): string {
   $s = trim(preg_replace('/\s+/', ' ', $s));
   if (function_exists('mb_substr')) return mb_substr($s, 0, 120);
   return substr($s, 0, 120);
-}
-
-// Ruta de almacenamiento (uploads)
-const UPLOAD_BASE = __DIR__.'/uploads';
-if (!is_dir(UPLOAD_BASE)) {
-  @mkdir(UPLOAD_BASE, 0775, true);
 }
