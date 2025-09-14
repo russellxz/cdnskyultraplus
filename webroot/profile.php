@@ -178,7 +178,11 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
             }
             upBtn.disabled = true; const old=upBtn.textContent; upBtn.textContent='Subiendo…';
             try{
-              const r = await fetch('upload.php', { method:'POST', body:new FormData(up) });
+              const r = await fetch('upload.php', {
+                method:'POST',
+                body:new FormData(up),
+                headers:{ 'Accept':'application/json' }
+              });
               if(!r.ok){
                 if(r.status === 413){
                   msg(false, `<span>❌</span> Archivo demasiado grande (HTTP 413). Revisa <code>client_max_body_size</code> en Nginx y <code>upload_max_filesize/post_max_size</code> en PHP.`);
@@ -195,13 +199,13 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
                 const url = j.file.url;
                 msg(true, `
                   <span>✅</span>
-                  <a class="url" href="\${url}" target="_blank">\${url}</a>
-                  <button type="button" class="btn btn-sm" data-url="\${url}">Copiar URL</button>
+                  <a class="url" href="${url}" target="_blank">${url}</a>
+                  <button type="button" class="btn btn-sm" data-url="${url}">Copiar URL</button>
                 `);
-                if (j.warn) msg(true, `<span>ℹ️</span> \${j.warn}`);
+                if (j.warn) msg(true, `<span>ℹ️</span> ${j.warn}`);
                 up.reset();
               } else {
-                msg(false, `<span>❌</span> \${j.error || 'Error'}${deluxeCTA}`);
+                msg(false, `<span>❌</span> ${j.error || 'Error'}${deluxeCTA}`);
               }
             } catch(e){
               msg(false, `<span>❌</span> Error de red. Revisa conexión o límites del proxy/WAF.`);
