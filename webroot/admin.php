@@ -167,15 +167,17 @@ $ipon = setting_get('ip_block_enabled','1') === '1';
 
 $q = trim($_GET['q'] ?? '');
 if ($q !== '') {
+  // ⚠️ FIX: no reutilizamos el mismo placeholder varias veces.
+  $like = '%'.$q.'%';
   $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
           FROM users
-          WHERE email LIKE :q
-             OR username LIKE :q
-             OR first_name LIKE :q
-             OR last_name LIKE :q
+          WHERE email      LIKE ?
+             OR username   LIKE ?
+             OR first_name LIKE ?
+             OR last_name  LIKE ?
           ORDER BY id DESC LIMIT 100";
   $st = $pdo->prepare($sql);
-  $st->execute([':q'=>'%'.$q.'%']);
+  $st->execute([$like,$like,$like,$like]);
 } else {
   $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
                      FROM users ORDER BY id DESC LIMIT 50");
@@ -409,7 +411,7 @@ async function poll(){
     // Uptime / load
     document.getElementById('metaUptime').textContent =
       `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
-  }catch(e){ /* silenciar para no romper UI */ }
+  }catch(e){ /* silencio */ }
   setTimeout(poll, 2000);
 }
 function fmtBytes(b){
