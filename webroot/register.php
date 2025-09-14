@@ -2,8 +2,20 @@
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/mail.php';
 
-// db.php ya hace session_start() en tu proyecto; evitamos duplicarlo
+// db.php ya hace session_start(); evitamos duplicarlo
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+// Fallback local por si no existe rand_key en tu proyecto
+if (!function_exists('rand_key')) {
+  function rand_key(int $len=16): string {
+    $bytes = random_bytes(max(8, $len));
+    $base  = rtrim(strtr(base64_encode($bytes), '+/', '._'), '=');
+    // recorta/limpia a [A-Za-z0-9._] y garantiza longitud
+    $base = preg_replace('/[^A-Za-z0-9._]/', '', $base);
+    while (strlen($base) < $len) $base .= substr($base, 0, $len - strlen($base));
+    return substr($base, 0, $len);
+  }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $first = trim($_POST['first'] ?? '');
@@ -12,7 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $email = trim($_POST['email'] ?? '');
   $pass  = $_POST['pass'] ?? '';
   $pass2 = $_POST['pass2'] ?? '';
-  $ip    = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+
+  // IP real (usa helper de db.php si está)
+  $ip = function_exists('client_ip')
+        ? client_ip()
+        : ($_SERVER['HTTP_CF_CONNECTING_IP'] ?? ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
 
   // Normaliza y valida email
   $lower = function($s){ return function_exists('mb_strtolower') ? mb_strtolower($s) : strtolower($s); };
@@ -38,19 +54,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: index.php'); exit;
   }
 
-  // Bloqueo por IP si está activado en settings
-  $block = setting_get('ip_block_enabled','1') === '1';
-  if ($block) {
-    $chk = $pdo->prepare("SELECT is_admin FROM users WHERE registration_ip=? LIMIT 1");
-    $chk->execute([$ip]);
-    $r = $chk->fetch();
-    if ($r && intval($r['is_admin']) === 0) {
-      $_SESSION['flash_err'] = '❌ Ya existe una cuenta creada desde tu IP.';
+  /* ===== Bloqueo por IP (una cuenta por IP) =====
+   * Respeta setting ip_block_enabled y la whitelist (ver db.php).
+   */
+  if (function_exists('ip_can_create_account_from_ip')) {
+    $chk = ip_can_create_account_from_ip($ip);
+    if (!$chk['ok']) {
+      $_SESSION['flash_err'] = '❌ '.$chk['error'];
       header('Location: index.php'); exit;
+    }
+  } else {
+    // Compat: bloqueo simple por registration_ip si no existe el helper
+    if (setting_get('ip_block_enabled','1') === '1') {
+      $chk = $pdo->prepare("SELECT COUNT(*) FROM users WHERE registration_ip=? OR ? IN (signup_ip,last_ip)");
+      try { $chk->execute([$ip,$ip]); } catch(Throwable $e){ $chk = null; }
+      if ($chk && (int)$chk->fetchColumn() > 0) {
+        $_SESSION['flash_err'] = '❌ Ya existe una cuenta creada desde tu IP.';
+        header('Location: index.php'); exit;
+      }
     }
   }
 
-  // Comprobaciones de unicidad amigables (para evitar 500 por unique)
+  // Comprobaciones de unicidad amigables (evita error 500 por UNIQUE)
   $st = $pdo->prepare("SELECT 1 FROM users WHERE email=? OR username=? LIMIT 1");
   $st->execute([$email, $user]);
   if ($st->fetch()) {
@@ -58,24 +83,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: index.php'); exit;
   }
 
-  $api   = rand_key(16);   // API key corta (el admin puede cambiarla)
+  $api   = rand_key(16);   // API key corta inicial (el usuario/admin puede cambiarla luego)
   $token = rand_key(48);   // token de verificación
 
+  // Cuota por defecto configurable (settings) con fallback a 10
+  $defaultQuota = (int) setting_get('default_quota', '10');
+  if ($defaultQuota <= 0) $defaultQuota = 10;
+
   try {
-    $ins = $pdo->prepare("
-      INSERT INTO users(
-        email, username, first_name, last_name, pass, api_key,
-        is_admin, is_deluxe, verified, verify_token, quota_limit, registration_ip
-      ) VALUES(?,?,?,?,?,?, 0,0,0, ?, 50, ?)
-    ");
-    $ins->execute([
+    // Intentamos usar también signup_ip/last_ip si existen (db.php ya las migra)
+    $cols  = "email, username, first_name, last_name, pass, api_key, is_admin, is_deluxe, verified, verify_token, quota_limit, registration_ip";
+    $vals  = "?,?,?,?,?,?, 0,0,0, ?, ?, ?";
+    $args  = [
       $email, $user, $first, $last,
       password_hash($pass, PASSWORD_DEFAULT),
       $api,
-      $token, $ip
-    ]);
+      $token, $defaultQuota, $ip
+    ];
 
-    // Envía verificación (si falla no bloquea)
+    // Si existen columnas nuevas, las incluimos
+    $have_signup = true; $have_last = true;
+    try {
+      $q1 = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='signup_ip'");
+      $q1->execute(); $have_signup = ((int)$q1->fetchColumn()===1);
+      $q2 = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='last_ip'");
+      $q2->execute(); $have_last = ((int)$q2->fetchColumn()===1);
+    } catch(Throwable $e) { $have_signup = $have_last = false; }
+
+    if ($have_signup) { $cols .= ", signup_ip"; $vals .= ", ?"; $args[] = $ip; }
+    if ($have_last)   { $cols .= ", last_ip";   $vals .= ", ?"; $args[] = $ip; }
+
+    $sql = "INSERT INTO users($cols) VALUES($vals)";
+    $ins = $pdo->prepare($sql);
+    $ins->execute($args);
+
+    // Enviar verificación (si falla no bloquea)
     $sent = false;
     try { $sent = send_verify_email($email, $token, $err); } catch (Throwable $e) {}
 
@@ -86,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: index.php'); exit;
 
   } catch (Throwable $e) {
-    error_log("REGISTER_ERR: ".$e->getMessage()); // Para debug en logs
+    error_log("REGISTER_ERR: ".$e->getMessage());
     $m = $e->getMessage();
     $_SESSION['flash_err'] = (stripos($m,'duplicate')!==false || stripos($m,'unique')!==false)
       ? '❌ Usuario o correo ya registrado.'
