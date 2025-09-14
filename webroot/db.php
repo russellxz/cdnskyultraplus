@@ -122,7 +122,25 @@ function ensure_column(string $table, string $col, string $type): void {
     $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$col` $type");
   }
 }
+
+/* Índices idempotentes */
+function ensure_index(string $table, string $indexName, string $columnsSql): void {
+  global $pdo;
+  $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
+  $q->execute([$table, $indexName]);
+  if ((int)$q->fetchColumn() === 0) {
+    $pdo->exec("CREATE INDEX `$indexName` ON `$table` ($columnsSql)");
+  }
+}
+
 ensure_column('users', 'registration_ip', 'VARCHAR(45) NULL');
+
+/* === NUEVO: columnas/IP para bloqueo por IP (compatibles con MariaDB) === */
+ensure_column('users', 'signup_ip', 'VARCHAR(45) NULL');
+ensure_column('users', 'last_ip',   'VARCHAR(45) NULL');
+ensure_index('users', 'users_signup_ip', 'signup_ip');
+ensure_index('users', 'users_last_ip',   'last_ip');
 
 /* ===========================
  *  Settings helpers (k/v) + compat
@@ -219,6 +237,10 @@ function is_admin(int $uid): bool {
 if (setting_get('ip_block_enabled') === null) {
   setting_set('ip_block_enabled', '1');
 }
+// Default opcional para whitelist (lista vacía si no existe)
+if (setting_get('ip_whitelist') === null) {
+  setting_set('ip_whitelist', '');
+}
 
 /* Carpeta de uploads */
 if (defined('UPLOAD_BASE')) {
@@ -226,4 +248,92 @@ if (defined('UPLOAD_BASE')) {
 } else {
   $uploadsDir = __DIR__ . '/uploads';
   if (!is_dir($uploadsDir)) { @mkdir($uploadsDir, 0775, true); }
+}
+
+/* =========================================================
+ *  NUEVO: Helpers de IP (Cloudflare/proxy) y bloqueo por IP
+ * ========================================================= */
+
+/** Devuelve la IP real del cliente respetando Cloudflare/Proxies */
+function client_ip(): string {
+  $cands = [
+    $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '',
+    $_SERVER['HTTP_X_FORWARDED_FOR']  ?? '',
+    $_SERVER['HTTP_X_REAL_IP']        ?? '',
+    $_SERVER['REMOTE_ADDR']           ?? '',
+  ];
+  foreach ($cands as $ip) {
+    if (!$ip) continue;
+    $ip = trim(explode(',', $ip)[0]);
+    if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+  }
+  return '0.0.0.0';
+}
+
+/** Devuelve true si el toggle de bloqueo por IP está activo */
+function ip_block_enabled(): bool {
+  return setting_get('ip_block_enabled','1') === '1';
+}
+
+/** Devuelve arreglo de IPs whitelisted (settings: ip_whitelist, separadas por coma) */
+function ip_whitelist(): array {
+  $raw = (string) setting_get('ip_whitelist','');
+  $arr = array_filter(array_map('trim', explode(',', $raw)));
+  return $arr;
+}
+
+/**
+ * Verifica si se puede crear una cuenta desde la IP dada (una cuenta por IP).
+ * NO corta la ejecución: devuelve [ok=>bool, error=>?].
+ */
+function ip_can_create_account_from_ip(?string $ip=null): array {
+  global $pdo;
+  if ($ip === null) $ip = client_ip();
+
+  if (!ip_block_enabled()) return ['ok'=>true];
+
+  // Whitelist
+  if (in_array($ip, ip_whitelist(), true)) return ['ok'=>true];
+
+  try{
+    // Asegurar columnas/índices (por si el registro corre antes que db.php cargue migraciones)
+    ensure_column('users','signup_ip','VARCHAR(45) NULL');
+    ensure_column('users','last_ip','VARCHAR(45) NULL');
+    ensure_index('users','users_signup_ip','signup_ip');
+    ensure_index('users','users_last_ip','last_ip');
+
+    $st = $pdo->prepare("SELECT COUNT(*) FROM users WHERE signup_ip=? OR last_ip=?");
+    $st->execute([$ip,$ip]);
+    if ((int)$st->fetchColumn() > 0) {
+      return ['ok'=>false,'error'=>'Bloqueo por IP activo: ya existe una cuenta creada desde tu IP.'];
+    }
+    return ['ok'=>true];
+  }catch(Throwable $e){
+    // En caso de error de esquema/permiso no bloquear
+    return ['ok'=>true];
+  }
+}
+
+/**
+ * Guard utilitario para endpoints de registro.
+ * Si no se puede crear la cuenta, responde 429 JSON y exit.
+ */
+function ip_guard_create_account_or_exit_json(?string $ip=null): void {
+  $ip = $ip ?: client_ip();
+  $chk = ip_can_create_account_from_ip($ip);
+  if (!$chk['ok']) {
+    header('Content-Type: application/json; charset=utf-8', true, 429);
+    echo json_encode(['ok'=>false,'error'=>$chk['error']], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    exit;
+  }
+}
+
+/** Actualiza last_ip para un usuario (llámalo al login u otras acciones) */
+function user_touch_last_ip(int $user_id, ?string $ip=null): void {
+  global $pdo;
+  $ip = $ip ?: client_ip();
+  try {
+    $st = $pdo->prepare("UPDATE users SET last_ip=? WHERE id=?");
+    $st->execute([$ip, $user_id]);
+  } catch(Throwable $e){ /* silencioso */ }
 }
