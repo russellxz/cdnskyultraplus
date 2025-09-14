@@ -2,13 +2,18 @@
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/mail.php';
 
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 $me  = $pdo->query("SELECT * FROM users WHERE id=$uid")->fetch();
-if (!$me || !$me['is_admin']) { http_response_code(403); exit('403'); }
+if (!$me || (int)$me['is_admin'] !== 1) { http_response_code(403); exit('403'); }
 
-/* ----------------------- Helpers comunes ----------------------- */
-function json_out(array $a){ header('Content-Type: application/json; charset=utf-8'); echo json_encode($a, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }
+/* ----------------------- Helpers ----------------------- */
+function json_out(array $a){
+  header('Content-Type: application/json; charset=utf-8');
+  echo json_encode($a, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+  exit;
+}
 function bytes_fmt(int|float $b): string {
   $u=['B','KB','MB','GB','TB']; $i=0; while($b>=1024 && $i<count($u)-1){ $b/=1024; $i++; }
   return number_format($b, $b>=10?0:1).' '.$u[$i];
@@ -18,17 +23,14 @@ function bytes_fmt(int|float $b): string {
 function metric_cpu_percent(float $interval=0.2): float {
   $line = @file('/proc/stat')[0] ?? '';
   if (strpos($line,'cpu')!==0) return -1;
-  $p = preg_split('/\s+/', trim($line)); // cpu user nice system idle iowait irq softirq steal guest guest_nice
+  $p = preg_split('/\s+/', trim($line));
   $idle1  = (int)($p[4] ?? 0);
   $total1 = 0; for ($i=1;$i<count($p);$i++) $total1 += (int)$p[$i];
-
   usleep((int)($interval*1_000_000));
-
   $line = @file('/proc/stat')[0] ?? '';
   $p = preg_split('/\s+/', trim($line));
   $idle2  = (int)($p[4] ?? 0);
   $total2 = 0; for ($i=1;$i<count($p);$i++) $total2 += (int)$p[$i];
-
   $diffTotal = max(1, $total2 - $total1);
   $diffIdle  = max(0, $idle2  - $idle1);
   $usage = (1 - ($diffIdle / $diffTotal)) * 100;
@@ -58,26 +60,22 @@ function metric_uptime(): string {
   if (!$u) return '';
   $secs = (int)floatval(explode(' ',$u)[0]);
   $d=floor($secs/86400); $h=floor(($secs%86400)/3600); $m=floor(($secs%3600)/60);
-  $out=[]; if($d) $out[]="$d d"; if($h) $out[]="$h h"; if($m || !$d && !$h) $out[]="$m m";
+  $out=[]; if($d) $out[]="$d d"; if($h) $out[]="$h h"; if($m || (!$d && !$h)) $out[]="$m m";
   return implode(' ', $out);
 }
-/* Endpoint GET ?action=metrics */
+
+/* === Endpoint GET ?action=metrics (antes de HTML) === */
 if (isset($_GET['action']) && $_GET['action']==='metrics') {
-  // Para el disco medimos donde se guardan los uploads
   $uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : (__DIR__.'/uploads');
-  $cpu = metric_cpu_percent(0.2);
-  $mem = metric_mem();
-  $dsk = metric_disk($uploadsBase);
+  $cpu  = metric_cpu_percent(0.2);
+  $mem  = metric_mem();
+  $dsk  = metric_disk($uploadsBase);
   $load = function_exists('sys_getloadavg') ? sys_getloadavg() : [0,0,0];
   json_out([
     'ok'=>true,
     'cpu_pct'=>$cpu,
-    'mem'=>[
-      'total'=>$mem['total'],'used'=>$mem['used'],'free'=>$mem['free'],'pct'=>$mem['percent'],
-    ],
-    'disk'=>[
-      'path'=>$dsk['path'],'total'=>$dsk['total'],'used'=>$dsk['used'],'free'=>$dsk['free'],'pct'=>$dsk['percent'],
-    ],
+    'mem'=>['total'=>$mem['total'],'used'=>$mem['used'],'free'=>$mem['free'],'pct'=>$mem['percent']],
+    'disk'=>['path'=>$dsk['path'],'total'=>$dsk['total'],'used'=>$dsk['used'],'free'=>$dsk['free'],'pct'=>$dsk['percent']],
     'load'=>['1m'=>round($load[0]??0,2),'5m'=>round($load[1]??0,2),'15m'=>round($load[2]??0,2)],
     'uptime'=>metric_uptime(),
   ]);
@@ -105,31 +103,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'user_update') {
     $id = (int)($_POST['id'] ?? 0);
-    $email = $pdo->query("SELECT email FROM users WHERE id=$id")->fetchColumn();
-    if ($email === ROOT_ADMIN_EMAIL) exit('ROOT protegido');
+    $row = $pdo->query("SELECT id,email FROM users WHERE id=$id")->fetch();
+    if (!$row) exit('Usuario no existe');
+
+    $isRootTarget = (defined('ROOT_ADMIN_EMAIL') && $row['email'] === ROOT_ADMIN_EMAIL);
+    $isSelf       = ($id === $uid);
 
     $api   = trim($_POST['api_key'] ?? '');
     $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
     $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
-    $quota = (int)($_POST['quota_limit'] ?? 50);
+    $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
 
-    $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?")
-        ->execute([$api, $adm, $dlx, $quota, $id]);
+    // Reglas: root y el propio admin no pueden quitarse admin
+    if ($isRootTarget || $isSelf) $adm = 1;
+
+    $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?");
+    $st->execute([$api, $adm, $dlx, $quota, $id]);
 
     exit('OK');
   }
 
   if ($action === 'user_delete') {
     $id = (int)($_POST['id'] ?? 0);
-    $email = $pdo->query("SELECT email FROM users WHERE id=$id")->fetchColumn();
-    if ($email === ROOT_ADMIN_EMAIL) exit('ROOT protegido');
+    $row = $pdo->query("SELECT email FROM users WHERE id=$id")->fetch();
+    if (!$row) exit('Usuario no existe');
 
+    if ((defined('ROOT_ADMIN_EMAIL') && $row['email'] === ROOT_ADMIN_EMAIL) || $id === $uid) {
+      exit('No puedes eliminar al ROOT ni a ti mismo');
+    }
+
+    // borrar archivos del usuario
     $st = $pdo->prepare("SELECT path FROM files WHERE user_id=?");
     $st->execute([$id]);
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $p) {
       if ($p && is_file($p)) @unlink($p);
       $dir = dirname($p);
-      if (is_dir($dir)) @rmdir($dir);
+      if ($dir && is_dir($dir)) @rmdir($dir);
     }
     $pdo->prepare("DELETE FROM files WHERE user_id=?")->execute([$id]);
     $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$id]);
@@ -188,7 +197,6 @@ $smtp  = smtp_get();
   table{width:100%;border-collapse:collapse} td,th{border-bottom:1px solid #273042;padding:8px}
   a{color:#93c5fd}
   label.small{font-size:12px;color:#94a3b8;margin-right:6px}
-  /* Monitor */
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .kpi{background:#0f172a;border:1px solid #273042;border-radius:12px;padding:10px}
   .kpi h4{margin:2px 0 8px;font-size:14px;color:#93c5fd}
@@ -223,23 +231,24 @@ $smtp  = smtp_get();
       </div>
     </div>
   </div>
-  <!-- paypal -->
+
   <div class="card">
     <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
     <button class="btn" onclick="tgl()">Alternar</button>
     <script>
       async function tgl(){
         const r=await fetch('admin.php',{method:'POST',body:new URLSearchParams({action:'toggle_ip'})});
-        location.reload();
+        alert(await r.text()); location.reload();
       }
     </script>
   </div>
-<div class="card">
-  <h3>Pagos (PayPal)</h3>
-  <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
-  <a class="btn" href="admin_payments.php">Abrir configuración</a>
-</div>
-  
+
+  <div class="card">
+    <h3>Pagos (PayPal)</h3>
+    <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
+    <a class="btn" href="admin_payments.php">Abrir configuración</a>
+  </div>
+
   <div class="card">
     <h3>SMTP</h3>
     <form onsubmit="saveSMTP(event)">
@@ -291,19 +300,29 @@ $smtp  = smtp_get();
           <th>Verif</th><th>Admin</th><th>Deluxe</th><th>Quota</th><th>API Key</th><th>Acciones</th>
         </tr>
         <?php foreach($users as $u): ?>
+          <?php
+            $isRoot = (defined('ROOT_ADMIN_EMAIL') && $u['email']===ROOT_ADMIN_EMAIL);
+            $isSelf = ($u['id']===$uid);
+          ?>
           <tr>
             <td><?=$u['id']?></td>
             <td><?=htmlspecialchars($u['username'])?></td>
             <td><?=htmlspecialchars(trim(($u['first_name']??'').' '.($u['last_name']??'')))?></td>
-            <td><?=htmlspecialchars($u['email'])?></td>
+            <td><?=htmlspecialchars($u['email'])?> <?=$isSelf?'<span class="muted">(tú)</span>':''?></td>
             <td><?=$u['verified']?'✔️':'—'?></td>
-            <td><input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=$u['email']===ROOT_ADMIN_EMAIL?'disabled':''?>></td>
+            <td>
+              <input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?>
+                     <?=($isRoot||$isSelf)?'disabled':''?>>
+            </td>
             <td><input type="checkbox" id="dx<?=$u['id']?>" <?=$u['is_deluxe']?'checked':''?>></td>
             <td><input class="input" style="width:90px" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>"></td>
-            <td><input class="input" id="api<?=$u['id']?>" value="<?=htmlspecialchars($u['api_key'])?>"></td>
+            <td style="min-width:240px;display:flex;gap:6px;align-items:center">
+              <input class="input" id="api<?=$u['id']?>" value="<?=htmlspecialchars($u['api_key'])?>">
+              <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
+            </td>
             <td>
-              <button class="btn" onclick="upd(<?=$u['id']?>)" >Guardar</button>
-              <?php if($u['email']!==ROOT_ADMIN_EMAIL): ?>
+              <button class="btn" onclick="upd(<?=$u['id']?>)">Guardar</button>
+              <?php if(!$isRoot && !$isSelf): ?>
                 <button class="btn" onclick="delu(<?=$u['id']?>)" style="background:#f87171;margin-left:6px">Eliminar</button>
               <?php endif; ?>
             </td>
@@ -312,6 +331,15 @@ $smtp  = smtp_get();
       </table>
     </div>
     <script>
+      function rndKey(len=40){
+        const chars='abcdef0123456789'; let o='';
+        for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)];
+        return o;
+      }
+      function regen(id){
+        const inp=document.getElementById('api'+id);
+        inp.value=rndKey(40);
+      }
       async function upd(id){
         const fd=new FormData();
         fd.append('action','user_update');
@@ -321,15 +349,13 @@ $smtp  = smtp_get();
         fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
         fd.append('quota_limit', document.getElementById('qt'+id).value);
         const r=await fetch('admin.php',{method:'POST',body:fd});
-        alert(await r.text());
-        location.reload();
+        alert(await r.text()); location.reload();
       }
       async function delu(id){
         if(!confirm('¿Eliminar usuario y sus archivos?')) return;
         const fd=new FormData(); fd.append('action','user_delete'); fd.append('id',id);
         const r=await fetch('admin.php',{method:'POST',body:fd});
-        alert(await r.text());
-        location.reload();
+        alert(await r.text()); location.reload();
       }
     </script>
   </div>
@@ -357,19 +383,16 @@ function drawSpark(ctx, arr){
   }
   ctx.stroke();
 }
-
 function push(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
 
 async function poll(){
   try{
     const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
     const j = await r.json();
-
     // CPU
     push(cpuArr, Number(j.cpu_pct||0));
     drawSpark(cpuC, cpuArr);
     document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
-
     // MEM
     const mp = Number(j.mem?.pct||0);
     push(memArr, mp);
@@ -377,18 +400,16 @@ async function poll(){
     document.getElementById('memTxt').textContent = mp+'%';
     document.getElementById('memDetail').textContent =
       (fmtBytes(j.mem?.used||0))+' / '+(fmtBytes(j.mem?.total||0));
-
     // DISK
     const dp = Number(j.disk?.pct||0);
     document.getElementById('diskFill').style.width = dp+'%';
     document.getElementById('diskTxt').textContent = dp+'%';
     document.getElementById('diskDetail').textContent =
       (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
-
     // Uptime / load
     document.getElementById('metaUptime').textContent =
       `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
-  }catch(e){}
+  }catch(e){ /* silenciar para no romper UI */ }
   setTimeout(poll, 2000);
 }
 function fmtBytes(b){
