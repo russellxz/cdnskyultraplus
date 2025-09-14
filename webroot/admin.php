@@ -116,14 +116,18 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
   ]);
 }
 
-/* === GET ?action=user_list (buscador en tiempo real) === */
+/* === Endpoint GET ?action=user_list (buscador en tiempo real) ===
+   - Totalmente compatible con MariaDB/MySQL (sin COLLATE ni LIKE)
+   - Coincidencia por ID exacto, email, username, nombre, apellido y nombre completo
+   - Búsqueda insensible a mayúsculas usando LOWER + INSTR
+*/
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
   $qRaw = (string)($_GET['q'] ?? '');
   $q = trim($qRaw);
 
   try {
-    // Si es ID exacto
+    // Si consultan por ID exacto (entero)
     if ($q !== '' && ctype_digit($q)) {
       $st = $pdo->prepare("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
                            FROM users WHERE id=? LIMIT 1");
@@ -132,36 +136,22 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
     }
 
     if ($q !== '') {
-      $inner = str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q);
-      $like  = '%'.$inner.'%';
+      // Normaliza a minúsculas
+      $lower = function($s){ return function_exists('mb_strtolower') ? mb_strtolower($s,'UTF-8') : strtolower($s); };
+      $needle = $lower($q);
 
-      // 1) Intento rápido con COLLATE (MariaDB/MySQL moderno)
-      try {
-        $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                FROM users
-                WHERE email      COLLATE utf8mb4_general_ci LIKE :q
-                   OR username   COLLATE utf8mb4_general_ci LIKE :q
-                   OR first_name COLLATE utf8mb4_general_ci LIKE :q
-                   OR last_name  COLLATE utf8mb4_general_ci LIKE :q
-                   OR CONCAT_WS(' ', first_name, last_name) COLLATE utf8mb4_general_ci LIKE :q
-                ORDER BY id DESC
-                LIMIT 200";
-        $st = $pdo->prepare($sql);
-        $st->execute([':q'=>$like]);
-      } catch (Throwable $e) {
-        // 2) Fallback universal (LOWER)
-        $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                FROM users
-                WHERE LOWER(email)      LIKE LOWER(:q)
-                   OR LOWER(username)   LIKE LOWER(:q)
-                   OR LOWER(first_name) LIKE LOWER(:q)
-                   OR LOWER(last_name)  LIKE LOWER(:q)
-                   OR LOWER(CONCAT_WS(' ', first_name, last_name)) LIKE LOWER(:q)
-                ORDER BY id DESC
-                LIMIT 200";
-        $st = $pdo->prepare($sql);
-        $st->execute([':q'=>$like]);
-      }
+      // Contiene (case-insensitive) con INSTR(LOWER(col), :p) > 0
+      $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
+              FROM users
+              WHERE INSTR(LOWER(email), :p) > 0
+                 OR INSTR(LOWER(username), :p) > 0
+                 OR INSTR(LOWER(first_name), :p) > 0
+                 OR INSTR(LOWER(last_name), :p) > 0
+                 OR INSTR(LOWER(CONCAT_WS(' ', first_name, last_name)), :p) > 0
+              ORDER BY id DESC
+              LIMIT 200";
+      $st = $pdo->prepare($sql);
+      $st->execute([':p'=>$needle]);
     } else {
       $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
                          FROM users ORDER BY id DESC LIMIT 50");
@@ -170,7 +160,7 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
 
-  } catch(Throwable $e){
+  } catch (Throwable $e) {
     error_log('ADMIN user_list error: '.$e->getMessage());
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
   }
