@@ -103,15 +103,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit('OK');
   }
 
+  /* ======== BLOQUE ACTUALIZADO (permite editar ROOT, sin quitarle admin y evita quedarse sin admins) ======== */
   if ($action === 'user_update') {
     $id = (int)($_POST['id'] ?? 0);
-    $email = $pdo->query("SELECT email FROM users WHERE id=$id")->fetchColumn();
-    if ($email === ROOT_ADMIN_EMAIL) exit('ROOT protegido');
+
+    // Cargamos datos del usuario destino
+    $st = $pdo->prepare("SELECT email, is_admin FROM users WHERE id=? LIMIT 1");
+    $st->execute([$id]);
+    $u = $st->fetch();
+    if (!$u) exit('Usuario no encontrado');
 
     $api   = trim($_POST['api_key'] ?? '');
     $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
     $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
-    $quota = (int)($_POST['quota_limit'] ?? 50);
+    $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
+
+    // 1) El ROOT puede editarse, pero nunca se le puede quitar admin
+    if (defined('ROOT_ADMIN_EMAIL') && strcasecmp((string)$u['email'], ROOT_ADMIN_EMAIL) === 0) {
+      $adm = 1;
+    }
+
+    // 2) Si intentan degradar a un admin, evitamos dejar el sistema sin admins
+    if ((int)$u['is_admin'] === 1 && $adm === 0) {
+      $nAdmins = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE is_admin=1")->fetchColumn();
+      if ($nAdmins <= 1) exit('No puedes quitar admin al último administrador.');
+    }
 
     $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?")
         ->execute([$api, $adm, $dlx, $quota, $id]);
@@ -223,7 +239,7 @@ $smtp  = smtp_get();
       </div>
     </div>
   </div>
-  <!-- paypal -->
+
   <div class="card">
     <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
     <button class="btn" onclick="tgl()">Alternar</button>
@@ -234,12 +250,13 @@ $smtp  = smtp_get();
       }
     </script>
   </div>
-<div class="card">
-  <h3>Pagos (PayPal)</h3>
-  <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
-  <a class="btn" href="admin_payments.php">Abrir configuración</a>
-</div>
-  
+
+  <div class="card">
+    <h3>Pagos (PayPal)</h3>
+    <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
+    <a class="btn" href="admin_payments.php">Abrir configuración</a>
+  </div>
+
   <div class="card">
     <h3>SMTP</h3>
     <form onsubmit="saveSMTP(event)">
