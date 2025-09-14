@@ -94,23 +94,29 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
   $q = trim($_GET['q'] ?? '');
   try {
     if ($q !== '') {
-      // LIKE insensible a mayúsculas y escapando comodines
-      $like = '%'.str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q).'%';
+      // LIKE con escape de comodines y case-insensitive (compatible con MariaDB)
+      $like   = '%'.str_replace(['\\','%','_'], ['\\\\','\\%','\\_'], $q).'%';
+      $qlower = function_exists('mb_strtolower') ? mb_strtolower($like, 'UTF-8') : strtolower($like);
       $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
               FROM users
-              WHERE LOWER(email)      LIKE LOWER(:q) ESCAPE '\\'
-                 OR LOWER(username)   LIKE LOWER(:q) ESCAPE '\\'
-                 OR LOWER(first_name) LIKE LOWER(:q) ESCAPE '\\'
-                 OR LOWER(last_name)  LIKE LOWER(:q) ESCAPE '\\'
+              WHERE LOWER(email)      LIKE :q1 ESCAPE '\\'
+                 OR LOWER(username)   LIKE :q2 ESCAPE '\\'
+                 OR LOWER(first_name) LIKE :q3 ESCAPE '\\'
+                 OR LOWER(last_name)  LIKE :q4 ESCAPE '\\'
               ORDER BY id DESC
               LIMIT 200";
       $st = $pdo->prepare($sql);
-      $st->execute([':q'=>$like]);
+      $st->execute([
+        ':q1'=>$qlower,
+        ':q2'=>$qlower,
+        ':q3'=>$qlower,
+        ':q4'=>$qlower
+      ]);
     } else {
       $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
                          FROM users ORDER BY id DESC LIMIT 50");
     }
-    $rows = $st->fetchAll();
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
   } catch(Throwable $e){
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
@@ -139,10 +145,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'user_update') {
     try{
-      $id = (int)($_POST['id'] ?? 0);
-      $row = $pdo->prepare("SELECT id,email FROM users WHERE id=? LIMIT 1");
-      $row->execute([$id]);
-      $row = $row->fetch();
+      $idSt = $pdo->prepare("SELECT id,email FROM users WHERE id=? LIMIT 1");
+      $id   = (int)($_POST['id'] ?? 0);
+      $idSt->execute([$id]);
+      $row  = $idSt->fetch();
       if (!$row) exit('Usuario no existe');
 
       $isRootTarget = (defined('ROOT_ADMIN_EMAIL') && $row['email'] === ROOT_ADMIN_EMAIL);
@@ -153,7 +159,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
       $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
 
-      // Reglas: root y el propio admin no pueden quitarse admin
       if ($isRootTarget || $isSelf) $adm = 1;
 
       $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?");
@@ -215,7 +220,7 @@ $ipon = setting_get('ip_block_enabled','1') === '1';
 try{
   $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
                      FROM users ORDER BY id DESC LIMIT 50");
-  $users = $st->fetchAll();
+  $users = $st->fetchAll(PDO::FETCH_ASSOC);
 } catch(Throwable $e){ $users = []; }
 $smtp  = smtp_get();
 ?>
@@ -438,7 +443,6 @@ async function upd(id){
   fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
   const r=await fetch('admin.php',{method:'POST',body:fd});
   alert(await r.text()); 
-  // No recargamos; mejor refrescamos la fila con la búsqueda actual
   runSearch(false);
 }
 async function delu(id){
@@ -456,7 +460,7 @@ const hint   = document.getElementById('usersHint');
 let t=null, ctl=null;
 
 function rowHtml(u, selfId, rootEmail){
-  const isSelf = (u.id===selfId);
+  const isSelf = (String(u.id)===String(selfId));
   const isRoot = (rootEmail && u.email===rootEmail);
   return `
     <tr>
@@ -498,7 +502,6 @@ async function runSearch(showLoading=true){
 }
 function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
 qAdmin?.addEventListener('input', deb);
-// Cargar listado inicial via ajax para sincronizar (opcional)
 runSearch(false);
 </script>
 </body>
