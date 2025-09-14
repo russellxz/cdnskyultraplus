@@ -1,7 +1,11 @@
 <?php
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../config.php';
+
 header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Api-Key, X-APIKEY');
 
 function jsonOut(array $p, int $status = 200){
   http_response_code($status);
@@ -9,34 +13,45 @@ function jsonOut(array $p, int $status = 200){
   exit;
 }
 
+/* ----- CORS preflight ----- */
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+  http_response_code(204);
+  exit;
+}
+
+/* ----- Sólo POST real ----- */
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   jsonOut(['ok'=>false,'error'=>'Método no permitido'], 405);
+}
+
+/* ----- Fallback de BASE_URL si no viene en config.php ----- */
+if (!defined('BASE_URL')) {
+  $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+  $host   = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
+  define('BASE_URL', $scheme.'://'.$host);
 }
 
 /* ===========================
  * 1) Autenticación por API key
  * =========================== */
-// Acepta header: X-API-Key (o POST api_key como fallback)
 $api = $_SERVER['HTTP_X_API_KEY']
     ?? ($_SERVER['HTTP_X_APIKEY'] ?? null)
     ?? ($_POST['api_key'] ?? '');
 $api = trim((string)$api);
 
 if ($api === '') {
-  // Bloqueo sin API key: NUNCA sube
   jsonOut(['ok'=>false,'error'=>'Falta API key (usa header X-API-Key o campo api_key)'], 401);
 }
 
-// Usuario por API key
 $st = $pdo->prepare("SELECT id, verified, is_deluxe, quota_limit FROM users WHERE api_key=? LIMIT 1");
 $st->execute([$api]);
 $u = $st->fetch();
-if (!$u)                          jsonOut(['ok'=>false,'error'=>'API key inválida'], 401);
-if ((int)$u['verified'] !== 1)    jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+if (!$u)                       jsonOut(['ok'=>false,'error'=>'API key inválida'], 401);
+if ((int)$u['verified'] !== 1) jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
 
-$uid       = (int)$u['id'];
-$isDeluxe  = (int)$u['is_deluxe'] === 1;
-$quotaMax  = (int)$u['quota_limit'];
+$uid      = (int)$u['id'];
+$isDeluxe = (int)$u['is_deluxe'] === 1;
+$quotaMax = (int)$u['quota_limit'];
 
 /* ===========================
  * 2) Validación de entrada
@@ -75,15 +90,16 @@ if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp
  * =========================== */
 if (!defined('SIZE_LIMIT_FREE_MB'))   define('SIZE_LIMIT_FREE_MB',   5);
 if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200);
-$maxMB = $isDeluxe ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 
+$maxMB     = $isDeluxe ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 $sizeBytes = (int)($_FILES['file']['size'] ?? 0);
+
 if ($sizeBytes <= 0) jsonOut(['ok'=>false,'error'=>'Archivo vacío o inválido']);
 if ($sizeBytes > $maxMB * 1024 * 1024) {
   jsonOut(['ok'=>false,'error'=>"Tu archivo excede el límite de {$maxMB}MB"]);
 }
 
-// cuota por cantidad
+/* cuota por cantidad */
 $c = $pdo->prepare("SELECT COUNT(*) FROM files WHERE user_id=?");
 $c->execute([$uid]);
 $usados = (int)$c->fetchColumn();
@@ -94,7 +110,7 @@ if ($usados >= $quotaMax) {
 /* ===========================
  * 4) Destino (disco)
  * =========================== */
-$root = realpath(__DIR__.'/..') ?: dirname(__DIR__);
+$root        = realpath(__DIR__.'/..') ?: dirname(__DIR__);
 $uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : ($root.'/uploads');
 
 $dir = rtrim($uploadsBase,'/')."/u$uid";
@@ -128,7 +144,7 @@ $mime  = $finfo ? (finfo_file($finfo, $path) ?: 'application/octet-stream') : 'a
 if ($finfo) @finfo_close($finfo);
 $origName = $orig !== '' ? $orig : $fname;
 
-// Aviso no bloqueante
+/* Aviso no bloqueante */
 $browserFriendly = [
   'image/jpeg','image/png','image/webp','image/gif',
   'audio/mpeg','audio/aac','audio/ogg',
@@ -137,18 +153,20 @@ $browserFriendly = [
 $warn = in_array($mime, $browserFriendly, true) ? null : 'Formato no estándar para navegador (se subió igual).';
 
 /* ===========================
- * 6) Insert en MariaDB (con detección de columnas)
+ * 6) Insert en MariaDB (detectando columnas)
  * =========================== */
 try {
-  // ¿tiene columnas mime/orig_name?
-  $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-                      WHERE TABLE_SCHEMA = DATABASE()
-                        AND TABLE_NAME = 'files'
-                        AND COLUMN_NAME IN ('mime','orig_name')");
+  $q = $pdo->prepare(
+    "SELECT COUNT(DISTINCT COLUMN_NAME)
+       FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME   = 'files'
+        AND COLUMN_NAME IN ('mime','orig_name')"
+  );
   $q->execute();
-  $haveExtra = ((int)$q->fetchColumn() >= 2);
+  $haveBoth = ((int)$q->fetchColumn() === 2);
 
-  if ($haveExtra) {
+  if ($haveBoth) {
     $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name)
             VALUES(?,?,?,?,?,?,?)";
     $params = [$uid, $name, $url, $path, $sizeBytes, $mime, $origName];
@@ -163,8 +181,8 @@ try {
   @unlink($path);
   $msg = $e->getMessage();
   if (stripos($msg,'Unknown column') !== false) {
-    $hint = "Esquema desactualizado en `files`. Puedes añadir columnas con:
-ALTER TABLE files ADD COLUMN mime VARCHAR(100) NULL, ADD COLUMN orig_name VARCHAR(191) NULL;";
+    $hint = "Esquema desactualizado en `files`. Añade columnas con:\n".
+            "ALTER TABLE files ADD COLUMN mime VARCHAR(100) NULL, ADD COLUMN orig_name VARCHAR(191) NULL;";
     jsonOut(['ok'=>false,'error'=>'Error al guardar en BD','hint'=>$hint], 500);
   }
   jsonOut(['ok'=>false,'error'=>'Error al guardar en la base de datos'], 500);
