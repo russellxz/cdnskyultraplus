@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_deluxe       TINYINT(1) DEFAULT 0,
   verified        TINYINT(1) DEFAULT 0,
   verify_token    VARCHAR(191),
-  quota_limit     INT DEFAULT 50,
+  quota_limit     INT DEFAULT 10,
   registration_ip VARCHAR(45),
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
