@@ -46,7 +46,7 @@ function try_ensure_index(PDO $pdo, string $table, string $index, string $defini
     if ((int)$q->fetchColumn() === 0) {
       $pdo->exec("CREATE INDEX `$index` ON `$table` ($definition)");
     }
-  }catch(Throwable $e){ /* silencioso */ }
+  }catch(Throwable $e){ /* siempre silencioso */ }
 }
 try_ensure_index($pdo, 'users', 'idx_users_username',  'username');
 try_ensure_index($pdo, 'users', 'idx_users_email',     'email');
@@ -115,7 +115,7 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
   ]);
 }
 
-/* === GET ?action=user_list (buscador en tiempo real) === */
+/* === Endpoint GET ?action=user_list (buscador en tiempo real) === */
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
   $qRaw = (string)($_GET['q'] ?? '');
@@ -194,7 +194,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $api   = trim($_POST['api_key'] ?? '');
       $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
       $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
-      $quota = max(0, (int)$_POST['quota_limit'] ?? 50);
+      $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
 
       if ($isRootTarget || $isSelf) $adm = 1;
 
@@ -219,6 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit('No puedes eliminar al ROOT ni a ti mismo');
       }
 
+      // borrar archivos del usuario
       $st = $pdo->prepare("SELECT path FROM files WHERE user_id=?");
       $st->execute([$id]);
       foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $p) {
@@ -260,160 +261,98 @@ try{
 } catch(Throwable $e){ $users = []; }
 $smtp  = smtp_get();
 ?>
-
-
 <!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel Admin — CDN</title>
 <style>
-  :root{
-    --bg:#0a0b10;
-    --card:#101321;
-    --card-2:#0d1220;
-    --stroke:#28324a;
-    --muted:#9fb0c9;
-    --txt:#eaf2ff;
-    --grad-1:#ef4444;   /* rojo */
-    --grad-2:#f472b6;   /* rosado */
-    --grad-3:#60a5fa;   /* azul claro */
-    --ok:#10b981;
-    --warn:#f59e0b;
-    --err:#ef4444;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{
-    margin:0;color:var(--txt);font:15px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu;
-    background: radial-gradient(1100px 500px at -20% -10%, rgba(239,68,68,.12), transparent 60%),
-                radial-gradient(900px 600px at 120% 10%, rgba(244,114,182,.12), transparent 60%),
-                linear-gradient(135deg, #090a12 0%, #0a0e18 50%, #0a0b10 100%);
-  }
-  a{color:#93c5fd;text-decoration:none}
-  .wrap{max-width:1200px;margin:0 auto;padding:24px}
-  .topbar{
-    display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
-    margin-bottom:14px;
-  }
-  .brand{
-    display:flex;gap:12px;align-items:center;
-    padding:10px 14px;border-radius:14px;
-    background:linear-gradient(90deg,rgba(96,165,250,.08),rgba(244,114,182,.08));
-    border:1px solid rgba(147,197,253,.25);
-  }
-  .brand .dot{
-    width:10px;height:10px;border-radius:50%;
-    background: radial-gradient(circle at 30% 30%, var(--grad-3), var(--grad-2));
-    box-shadow:0 0 16px rgba(96,165,250,.8);
-  }
-  .brand h2{margin:0;font-size:18px;letter-spacing:.3px}
+/* ====== Admin UI — SOLO ESTILOS (lógica intacta) ====== */
+:root{
+  --bg-1:#0a0b10;
+  --txt:#eaf2ff;
+  --muted:#9fb0c9;
+  --card:#111827;
+  --card-2:#0f172a;
+  --stroke:#334155;
+  /* degradado distinto: rojo -> rosado -> azul */
+  --g1:#ef4444; --g2:#f472b6; --g3:#60a5fa;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; color:var(--txt); font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto;
+  background:
+    radial-gradient(900px 500px at -15% -10%, rgba(239,68,68,.12), transparent 60%),
+    radial-gradient(900px 500px at 120% 10%, rgba(244,114,182,.10), transparent 60%),
+    linear-gradient(135deg,#090a12 0%, #0a0e18 50%, var(--bg-1) 100%);
+}
+a{color:#93c5fd;text-decoration:none}
+.wrap{max-width:1100px;margin:0 auto;padding:20px}
+h2{margin:6px 0 14px}
 
-  /* ---- botones --- */
-  .btn{
-    display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:800;
-    border:none;border-radius:12px;padding:10px 14px;color:#06101a;text-decoration:none;
-    transition: transform .05s ease, box-shadow .2s ease;
-    box-shadow:0 6px 20px rgba(0,0,0,.25);
-  }
-  .btn:hover{transform:translateY(-1px)}
-  .btn:active{transform:translateY(0)}
-  .btn.primary{
-    background:linear-gradient(90deg,var(--grad-1),var(--grad-2),var(--grad-3));
-  }
-  .btn.ghost{
-    background:transparent;border:1px solid var(--stroke);color:var(--txt)
-  }
-  .btn.success{background:linear-gradient(90deg,#059669,#10b981)}
-  .btn.warn{background:linear-gradient(90deg,#f59e0b,#f97316)}
-  .btn.danger{background:linear-gradient(90deg,#ef4444,#f43f5e);color:#1a0b0b}
+/* cards */
+.card{
+  background:linear-gradient(180deg,rgba(17,24,39,.95),rgba(15,23,42,.95));
+  border:1px solid var(--stroke);
+  border-radius:14px; padding:18px; margin-bottom:14px;
+}
 
-  .btn.sm{padding:7px 10px;border-radius:10px;font-weight:700}
-  .btn.icon{padding:8px;min-width:40px;justify-content:center}
+/* kpi */
+.kpi{background:var(--card-2);border:1px solid #273042;border-radius:12px;padding:10px}
+.kpi h4{margin:2px 0 8px;font-size:14px;color:#b3c7f5}
+.grid3{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:900px){ .grid3{grid-template-columns:repeat(3,1fr)} }
 
-  /* ---- tarjetas/kpis --- */
-  .grid{display:grid;gap:14px}
-  @media (min-width:960px){ .grid-3{grid-template-columns:repeat(3,1fr)} .grid-2{grid-template-columns:repeat(2,1fr)} }
-  .card{
-    background:linear-gradient(180deg, rgba(13,18,32,.9), rgba(12,16,28,.9));
-    border:1px solid var(--stroke);
-    border-radius:16px;padding:18px;backdrop-filter:blur(6px)
-  }
-  .cardHeader{
-    display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px
-  }
-  .card .muted{color:var(--muted);font-size:13px}
-  .kpi{background:var(--card-2);border:1px solid var(--stroke);border-radius:14px;padding:12px}
-  .kpi h4{margin:0 0 8px;font-size:13px;color:#b3c7f5;letter-spacing:.3px}
-  canvas.spark{width:100%;height:120px;background:#0b1222;border-radius:10px;border:1px solid #1c2740}
-  .bar{height:14px;background:#0c1426;border-radius:999px;overflow:hidden;border:1px solid #1e2a45}
-  .fill{height:100%;background:linear-gradient(90deg,var(--grad-2),var(--grad-3))}
-  .badge{display:inline-block;padding:2px 8px;border:1px solid var(--stroke);border-radius:999px;background:#0e162a;font-size:12px;margin-left:6px}
+/* inputs y botones */
+.input{
+  width:100%; padding:10px 12px; border-radius:10px;
+  border:1px solid var(--stroke); background:#0f172a; color:var(--txt);
+}
+label.small{font-size:12px;color:#94a3b8;margin-right:6px;display:block;margin-bottom:4px}
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  background:linear-gradient(90deg,var(--g1),var(--g2),var(--g3));
+  color:#051425; border:none; border-radius:10px; padding:9px 14px;
+  font-weight:800; cursor:pointer; text-decoration:none;
+  box-shadow:0 8px 20px rgba(0,0,0,.25); transition:transform .05s ease;
+}
+.btn:hover{transform:translateY(-1px)} .btn:active{transform:translateY(0)}
+.btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--stroke)}
+.btn.danger{background:linear-gradient(90deg,#ef4444,#f43f5e);color:#1a0b0b}
+.btn.success{background:linear-gradient(90deg,#059669,#10b981);color:#03150f}
+.muted{color:var(--muted);font-size:13px}
+.badge{display:inline-block;padding:2px 8px;border:1px solid var(--stroke);border-radius:999px;background:#0f172a;font-size:12px;margin-left:6px}
 
-  /* ---- tabla usuarios (responsive) --- */
-  .tableWrap{overflow:auto;border:1px solid var(--stroke);border-radius:14px}
-  table{width:100%;border-collapse:collapse;min-width:920px;background:var(--card-2)}
-  th,td{border-bottom:1px solid #1d2741;padding:10px;vertical-align:middle}
-  thead th{font-size:12px;color:#9fb0c9;text-align:left;background:#0e1527;position:sticky;top:0;z-index:2}
-  tbody tr:hover{background:#0e162a}
-  .td-actions{white-space:nowrap}
+/* charts */
+canvas.spark{width:100%;height:120px;background:#0b1222;border-radius:8px;border:1px solid #1c2740}
+.bar{height:16px;background:#0b1222;border-radius:999px;overflow:hidden;border:1px solid #273042}
+.fill{height:100%;background:linear-gradient(90deg,var(--g2),var(--g3))}
 
-  /* ---- inputs --- */
-  .input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:#0f172a;color:var(--txt)}
-  .input[readonly]{opacity:.85}
-  .row{display:grid;gap:10px}
-  @media(min-width:760px){ .row-2{grid-template-columns:1fr 1fr} .row-3{grid-template-columns:repeat(3,1fr)} }
+/* tabla usuarios */
+table{width:100%;border-collapse:collapse;min-width:900px;background:var(--card-2)}
+th,td{border-bottom:1px solid #273042;padding:10px;vertical-align:middle;text-align:left}
+thead th{position:sticky;top:0;background:#0e1527;color:#9fb0c9;font-size:12px;z-index:1}
+tbody tr:hover{background:#0f1a2c}
+td:last-child{display:flex;gap:12px;flex-wrap:wrap} /* separa Guardar/Eliminar */
+td:last-child .btn{min-width:96px}
 
-  /* ---- switch (bloqueo IP) --- */
-  .switch{position:relative;width:56px;height:28px;background:#1a2440;border:1px solid var(--stroke);border-radius:999px;cursor:pointer}
-  .switch .knob{position:absolute;top:3px;left:3px;width:22px;height:22px;background:#8893a8;border-radius:50%;transition:all .2s ease}
-  .switch.on{background:linear-gradient(90deg,#06b6d4,#22d3ee)}
-  .switch.on .knob{left:31px;background:#02131d}
+/* quota más ancho */
+table input[type="number"]{width:110px}
 
-  /* ---- helpers --- */
-  .hint{font-size:12px;color:#9fb0c9}
-  .spacer{height:8px}
-  .hr{height:1px;background:linear-gradient(90deg,transparent, #24314d 40%, #24314d 60%, transparent);margin:10px 0}
-
-  /* ---- botones de config destacados --- */
-  .cfgGrid{display:grid;gap:12px}
-  @media(min-width:700px){ .cfgGrid{grid-template-columns:1fr 1fr} }
-  .cfgCard{
-    display:flex;align-items:center;justify-content:space-between;gap:12px;
-    background:linear-gradient(180deg, rgba(20,26,41,.95), rgba(14,20,34,.95));
-    border:1px solid var(--stroke);border-radius:14px;padding:14px;
-  }
-  .cfgLeft{display:flex;align-items:center;gap:12px}
-  .cfgIcon{
-    width:38px;height:38px;border-radius:10px;
-    background:linear-gradient(135deg,var(--grad-2),var(--grad-3));
-    box-shadow:0 6px 20px rgba(96,165,250,.25);
-    display:flex;align-items:center;justify-content:center;font-weight:900;color:#0a1020
-  }
-  .cfgTitle{font-weight:800}
+/* SMTP password/user con ojo */
+.pwwrap{display:flex;gap:8px;align-items:center}
+.pwbtn{min-width:40px;padding:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <h2>Panel Admin</h2>
 
-  <!-- Encabezado -->
-  <div class="topbar">
-    <div class="brand">
-      <span class="dot"></span>
-      <h2>Panel Admin</h2>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a class="btn ghost sm" href="profile.php">← Volver</a>
-    </div>
-  </div>
-
-  <!-- Tarjeta: Monitor del servidor -->
+<!-- MONITOREO EN TIEMPO REAL -->
   <div class="card">
-    <div class="cardHeader">
-      <h3 style="margin:0">Monitoreo del servidor</h3>
-      <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
-    </div>
-    <div class="grid grid-3">
+    <h3>Monitoreo del servidor</h3>
+    <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
+    <div class="grid3" style="margin-top:10px">
       <div class="kpi">
         <h4>CPU</h4>
         <canvas id="cpuChart" class="spark" width="400" height="120"></canvas>
@@ -432,132 +371,91 @@ $smtp  = smtp_get();
     </div>
   </div>
 
-
-<!-- Tarjeta: Seguridad / Bloqueo IP -->
   <div class="card">
-    <div class="cardHeader">
-      <h3 style="margin:0">Seguridad</h3>
-      <div class="hint">Limita cuentas duplicadas por IP</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      <div id="ipSwitch" class="switch <?=$ipon?'on':''?>" onclick="tglIP()" title="Alternar bloqueo por IP"><div class="knob"></div></div>
-      <div class="muted">Bloqueo por IP: <b id="ipstate"><?=$ipon?'ON':'OFF'?></b></div>
-      <button class="btn ghost sm" type="button" onclick="tglIP()">Alternar</button>
+    <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
+    <button class="btn" onclick="tgl()">Alternar</button>
+    <script>
+      async function tgl(){
+        const r=await fetch('admin.php',{method:'POST',body:new URLSearchParams({action:'toggle_ip'})});
+        alert(await r.text()); location.reload();
+      }
+    </script>
+  </div>
+
+  <div class="card">
+    <h3>Pagos</h3>
+    <p class="muted">Configura proveedores de pago.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn" href="admin_payments.php">🅿️ Configurar PayPal</a>
+      <a class="btn" href="admin_stripe.php">💳 Configurar Stripe</a>
     </div>
   </div>
 
-  <!-- Tarjetas: Config de pagos -->
-  <div class="cfgGrid">
-    <div class="cfgCard">
-      <div class="cfgLeft">
-        <div class="cfgIcon">PP</div>
-        <div>
-          <div class="cfgTitle">Pagos (PayPal)</div>
-          <div class="hint">Credenciales, facturas y prueba de conexión</div>
-        </div>
-      </div>
-      <a class="btn primary" href="admin_payments.php">Abrir configuración</a>
-    </div>
-    <div class="cfgCard">
-      <div class="cfgLeft">
-        <div class="cfgIcon">💳</div>
-        <div>
-          <div class="cfgTitle">Pagos (Stripe)</div>
-          <div class="hint">Claves, webhook y Price IDs</div>
-        </div>
-      </div>
-      <a class="btn primary" href="admin_stripe.php">Abrir configuración</a>
-    </div>
-  </div>
-
-  <div class="spacer"></div>
-
-  <!-- Tarjeta: SMTP (con usuario/contraseña ocultos + “ojo”) -->
   <div class="card">
-    <div class="cardHeader">
-      <h3 style="margin:0">SMTP</h3>
-      <div class="hint">Credenciales de envío de correo</div>
-    </div>
-    <form onsubmit="saveSMTP(event)" class="row row-3">
-      <div>
-        <label class="hint">Host</label>
-        <input class="input" name="host" value="<?=h($smtp['host'])?>" placeholder="smtp.tu-dominio.com">
-      </div>
-      <div>
-        <label class="hint">Puerto</label>
-        <input class="input" name="port" value="<?=h($smtp['port'])?>" placeholder="587">
-      </div>
-      <div>
-        <label class="hint">From</label>
-        <input class="input" name="from" value="<?=h($smtp['from'])?>" placeholder="no-reply@dominio.com">
-      </div>
-      <div>
-        <label class="hint">Usuario (oculto)</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="input" id="smtp_user" type="password" name="user" value="<?=h($smtp['user'])?>" placeholder="correo@dominio.com">
-          <button class="btn ghost icon" type="button" onclick="reveal('smtp_user')">👁️</button>
+    <h3>SMTP</h3>
+    <form onsubmit="saveSMTP(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label class="small">Host</label><input class="input" name="host" value="<?=h($smtp['host'])?>" placeholder="smtp.tu-dominio.com"></div>
+        <div><label class="small">Puerto</label><input class="input" name="port" value="<?=h($smtp['port'])?>" placeholder="587"></div>
+
+        <div>
+          <label class="small">Usuario</label>
+          <div class="pwwrap">
+            <input class="input" id="smtp_user" type="password" name="user" value="<?=h($smtp['user'])?>" placeholder="correo@dominio.com">
+            <button class="btn ghost pwbtn" type="button" onclick="toggleEye('smtp_user')">👁️</button>
+          </div>
         </div>
-      </div>
-      <div>
-        <label class="hint">Contraseña (oculta)</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="input" id="smtp_pass" type="password" name="pass" value="<?=h($smtp['pass'])?>" placeholder="••••••">
-          <button class="btn ghost icon" type="button" onclick="reveal('smtp_pass')">👁️</button>
+        <div>
+          <label class="small">Contraseña</label>
+          <div class="pwwrap">
+            <input class="input" id="smtp_pass" type="password" name="pass" value="<?=h($smtp['pass'])?>" placeholder="••••••">
+            <button class="btn ghost pwbtn" type="button" onclick="toggleEye('smtp_pass')">👁️</button>
+          </div>
         </div>
+
+        <div><label class="small">From</label><input class="input" name="from" value="<?=h($smtp['from'])?>" placeholder="correo@dominio.com"></div>
+        <div><label class="small">Nombre remitente</label><input class="input" name="name" value="<?=h($smtp['name'])?>" placeholder="SkyUltraPlus"></div>
       </div>
-      <div>
-        <label class="hint">Nombre remitente</label>
-        <input class="input" name="name" value="<?=h($smtp['name'])?>" placeholder="SkyUltraPlus">
-      </div>
-      <div style="grid-column:1 / -1;display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <button class="btn success" type="submit">💾 Guardar SMTP</button>
-        <span class="hint">Los cambios son inmediatos</span>
-      </div>
+      <button class="btn success" style="margin-top:8px">💾 Guardar SMTP</button>
     </form>
+    <script>
+      async function saveSMTP(e){
+        e.preventDefault();
+        const fd=new FormData(e.target); fd.append('action','set_smtp');
+        const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
+      }
+    </script>
   </div>
 
-<!-- Tarjeta: Enviar correo -->
-  <div class="card">
-    <div class="cardHeader"><h3 style="margin:0">Enviar correo</h3><div class="hint">Rápido a 1 usuario o a todos</div></div>
-    <form onsubmit="sendMail(event)" class="row">
+
+<div class="card">
+    <h3>Enviar correo</h3>
+    <form onsubmit="sendMail(event)">
       <input class="input" name="to" placeholder="Correo destino o * para todos" required>
-      <div class="row row-2">
-        <input class="input" name="subject" placeholder="Asunto" required>
-        <input class="input" value="<?=h(setting_get('invoice_business','SkyUltraPlus'))?>" readonly>
-      </div>
-      <textarea class="input" name="message" placeholder="Mensaje HTML" style="height:140px" required></textarea>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn primary" type="submit">Enviar</button>
-        <span class="hint">Soporta HTML</span>
-      </div>
+      <input class="input" name="subject" placeholder="Asunto" style="margin-top:8px" required>
+      <textarea class="input" name="message" placeholder="Mensaje HTML" style="margin-top:8px;height:120px" required></textarea>
+      <button class="btn" style="margin-top:8px">Enviar</button>
     </form>
+    <script>
+      async function sendMail(e){
+        e.preventDefault();
+        const fd=new FormData(e.target); fd.append('action','mail_send');
+        const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
+      }
+    </script>
   </div>
 
-  <!-- Tarjeta: Usuarios -->
   <div class="card">
-    <div class="cardHeader">
-      <h3 style="margin:0">Usuarios</h3>
-      <div class="hint">Gestiona roles, cupo y API key</div>
-    </div>
-
-    <form id="searchForm" method="get" onsubmit="return false" style="margin-bottom:10px">
+    <h3>Usuarios</h3>
+    <form id="searchForm" method="get" onsubmit="return false">
       <input id="qAdmin" class="input" name="q" placeholder="Buscar por nombre, usuario o correo (en tiempo real)">
     </form>
-
-    <div class="tableWrap">
+    <div style="overflow:auto;margin-top:8px">
       <table>
         <thead>
           <tr>
-            <th style="width:70px">ID</th>
-            <th>Usuario</th>
-            <th>Nombre</th>
-            <th>Correo</th>
-            <th>Verif</th>
-            <th>Admin</th>
-            <th>Deluxe</th>
-            <th style="width:110px">Quota</th>
-            <th style="min-width:280px">API Key</th>
-            <th class="td-actions" style="width:220px">Acciones</th>
+            <th>ID</th><th>Usuario</th><th>Nombre</th><th>Correo</th>
+            <th>Verif</th><th>Admin</th><th>Deluxe</th><th>Quota</th><th>API Key</th><th>Acciones</th>
           </tr>
         </thead>
         <tbody id="usersTbody">
@@ -572,44 +470,39 @@ $smtp  = smtp_get();
               <td><?=h(trim(($u['first_name']??'').' '.($u['last_name']??'')))?></td>
               <td><?=h($u['email'])?> <?=$isSelf?'<span class="badge">tú</span>':''?></td>
               <td><?=$u['verified']?'✔️':'—'?></td>
-              <td><input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=($isRoot||$isSelf)?'disabled':''?>></td>
-              <td><input type="checkbox" id="dx<?=$u['id']?>" <?=$u['is_deluxe']?'checked':''?>></td>
-              <td><input class="input" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>" style="width:100%"></td>
               <td>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <input class="input" id="api<?=$u['id']?>" value="<?=h($u['api_key'])?>">
-                  <button class="btn ghost sm" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
-                </div>
+                <input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=($isRoot||$isSelf)?'disabled':''?>>
               </td>
-              <td class="td-actions">
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button class="btn success sm" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
-                  <?php if(!$isRoot && !$isSelf): ?>
-                    <button class="btn danger sm" type="button" onclick="delu(<?=$u['id']?>)">Eliminar</button>
-                  <?php endif; ?>
-                </div>
+              <td><input type="checkbox" id="dx<?=$u['id']?>" <?=$u['is_deluxe']?'checked':''?>></td>
+              <td><input class="input" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>"></td>
+              <td style="min-width:240px;display:flex;gap:6px;align-items:center">
+                <input class="input" id="api<?=$u['id']?>" value="<?=h($u['api_key'])?>">
+                <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
+              </td>
+              <td>
+                <button class="btn" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
+                <?php if(!$isRoot && !$isSelf): ?>
+                  <button class="btn danger" type="button" onclick="delu(<?=$u['id']?>)">Eliminar</button>
+                <?php endif; ?>
               </td>
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
+      <p class="muted" id="usersHint" style="margin-top:6px">Se muestran los últimos 50. Escribe para filtrar.</p>
     </div>
-
-    <p class="hint" id="usersHint" style="margin-top:6px">Se muestran los últimos 50. Escribe para filtrar.</p>
   </div>
 
-  <p class="hint" style="margin-top:8px"><a href="profile.php">Volver al perfil</a></p>
-
-</div><!-- /wrap -->
+  <p><a href="profile.php">Volver</a></p>
+</div>
 
 <script>
 /* ====== Monitor en tiempo real (CPU/RAM/Disco) ====== */
-const cpuC  = document.getElementById('cpuChart')?.getContext('2d');
-const memC  = document.getElementById('memChart')?.getContext('2d');
-const cpuArr= Array(60).fill(0);
-const memArr= Array(60).fill(0);
+const cpuC = document.getElementById('cpuChart').getContext('2d');
+const memC = document.getElementById('memChart').getContext('2d');
+const cpuArr = Array(60).fill(0);
+const memArr = Array(60).fill(0);
 function drawSpark(ctx, arr){
-  if(!ctx) return;
   const w = ctx.canvas.width, h = ctx.canvas.height;
   ctx.clearRect(0,0,w,h);
   ctx.lineWidth = 2; ctx.strokeStyle = '#60a5fa';
@@ -640,7 +533,7 @@ async function poll(){
       (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
     document.getElementById('metaUptime').textContent =
       `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
-  }catch(e){ /* silencio */ }
+  }catch(e){ }
   setTimeout(poll, 2000);
 }
 function fmtBytes(b){
@@ -649,34 +542,10 @@ function fmtBytes(b){
 }
 poll();
 
-/* ====== Bloqueo IP ====== */
-async function tglIP(){
-  try{
-    const r=await fetch('admin.php',{method:'POST',body:new URLSearchParams({action:'toggle_ip'})});
-    const tx=await r.text();
-    alert(tx);
-    const state=document.getElementById('ipstate');
-    const sw=document.getElementById('ipSwitch');
-    if(state && sw){
-      const on = state.textContent.trim()==='OFF';
-      state.textContent = on?'ON':'OFF';
-      sw.classList.toggle('on', on);
-    }
-  }catch(e){ alert('Error al alternar bloqueo IP'); }
-}
-
-/* ====== SMTP ====== */
-function reveal(id){ const i=document.getElementById(id); if(!i) return; i.type = (i.type==='password'?'text':'password'); }
-async function saveSMTP(e){
-  e.preventDefault();
-  const fd=new FormData(e.target); fd.append('action','set_smtp');
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text());
-}
-
 /* ====== Utilidades ====== */
 function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function rndKey(len=40){ const chars='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)]; return o; }
+function toggleEye(id){ const i=document.getElementById(id); if(!i) return; i.type = (i.type==='password'?'text':'password'); }
 
 /* ====== Acciones fila ====== */
 function regen(id){ const inp=document.getElementById('api'+id); if(inp) inp.value=rndKey(40); }
@@ -718,18 +587,14 @@ function rowHtml(u, selfId, rootEmail){
       <td>${u.verified ? '✔️' : '—'}</td>
       <td><input type="checkbox" id="ad${u.id}" ${u.is_admin?'checked':''} ${(isRoot||isSelf)?'disabled':''}></td>
       <td><input type="checkbox" id="dx${u.id}" ${u.is_deluxe?'checked':''}></td>
-      <td><input class="input" type="number" id="qt${u.id}" value="${u.quota_limit}" style="width:100%"></td>
-      <td>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
-          <button class="btn ghost sm" type="button" onclick="regen(${u.id})">🔁</button>
-        </div>
+      <td><input class="input" type="number" id="qt${u.id}" value="${u.quota_limit}"></td>
+      <td style="min-width:240px;display:flex;gap:6px;align-items:center">
+        <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
+        <button class="btn" type="button" onclick="regen(${u.id})">🔁</button>
       </td>
-      <td class="td-actions">
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn success sm" type="button" onclick="upd(${u.id})">Guardar</button>
-          ${(!isRoot && !isSelf) ? `<button class="btn danger sm" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
-        </div>
+      <td>
+        <button class="btn" type="button" onclick="upd(${u.id})">Guardar</button>
+        ${(!isRoot && !isSelf) ? `<button class="btn danger" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
       </td>
     </tr>
   `;
@@ -760,14 +625,7 @@ async function runSearch(showLoading=true){
 function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
 qAdmin?.addEventListener('input', deb);
 runSearch(false);
-
-/* ====== Enviar correo ====== */
-async function sendMail(e){
-  e.preventDefault();
-  const fd=new FormData(e.target); fd.append('action','mail_send');
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text());
-}
 </script>
 </body>
 </html>
+
