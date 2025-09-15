@@ -4,10 +4,15 @@ require_once __DIR__ . '/config.php';
 session_start();
 
 /* === Autoloader de Composer (Stripe SDK, etc.) === */
-$__autoload = __DIR__ . '/vendor/autoload.php';
-if (is_file($__autoload)) {
-  require_once $__autoload;
+$__candidates = [
+  __DIR__ . '/vendor/autoload.php',        // si vendor está en el mismo dir (p.ej. proyecto plano)
+  __DIR__ . '/../vendor/autoload.php',     // si db.php está en webroot/ y vendor en el root del proyecto
+  dirname(__DIR__) . '/vendor/autoload.php'
+];
+foreach ($__candidates as $__a) {
+  if (is_file($__a)) { require_once $__a; break; }
 }
+unset($__candidates, $__a);
 
 /* === Helpers globales útiles (no rompen nada) === */
 /** URL base pública (sin slash final). Usa BASE_URL si existe o infiere de la petición. */
