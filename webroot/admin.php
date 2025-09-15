@@ -1,19 +1,16 @@
 <?php
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/mail.php';
-
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 
-/* ========= Polyfills por compat ========= */
 if (!function_exists('str_starts_with')) {
   function str_starts_with(string $haystack, string $needle): bool {
     return $needle === '' || strpos($haystack, $needle) === 0;
   }
 }
 
-/* ========= Admin actual ========= */
 try {
   $meSt = $pdo->prepare("SELECT * FROM users WHERE id=? LIMIT 1");
   $meSt->execute([$uid]);
@@ -21,7 +18,6 @@ try {
 } catch(Throwable $e){ $me = null; }
 if (!$me || (int)$me['is_admin'] !== 1) { http_response_code(403); exit('403'); }
 
-/* ========= Helpers ========= */
 function json_out(array $a, int $code=200){
   http_response_code($code);
   header('Content-Type: application/json; charset=utf-8');
@@ -35,26 +31,20 @@ function bytes_fmt(int|float $b): string {
   return number_format($b, $b>=10?0:1).' '.$u[$i];
 }
 
-/* ========= (Opcional) comprobación silenciosa de índices =========
-   NO crea índices si no hay permisos; nunca rompe la página. */
 function try_ensure_index(PDO $pdo, string $table, string $index, string $definition): void {
   try{
-    $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
-                        WHERE TABLE_SCHEMA = DATABASE()
-                          AND TABLE_NAME   = ?
-                          AND INDEX_NAME   = ?");
+    $q = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
     $q->execute([$table,$index]);
     if ((int)$q->fetchColumn() === 0) {
       $pdo->exec("CREATE INDEX `$index` ON `$table` ($definition)");
     }
-  }catch(Throwable $e){ /* siempre silencioso */ }
+  }catch(Throwable $e){}
 }
 try_ensure_index($pdo, 'users', 'idx_users_username',  'username');
 try_ensure_index($pdo, 'users', 'idx_users_email',     'email');
 try_ensure_index($pdo, 'users', 'idx_users_first',     'first_name');
 try_ensure_index($pdo, 'users', 'idx_users_last',      'last_name');
 
-/* ========= Métricas ========= */
 function metric_cpu_percent(float $interval=0.2): float {
   $line = @file('/proc/stat')[0] ?? '';
   if (strpos($line,'cpu')!==0) return -1;
@@ -99,7 +89,6 @@ function metric_uptime(): string {
   return implode(' ', $out);
 }
 
-/* === GET ?action=metrics === */
 if (isset($_GET['action']) && $_GET['action']==='metrics') {
   $uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : (__DIR__.'/uploads');
   $cpu  = metric_cpu_percent(0.2);
@@ -116,18 +105,11 @@ if (isset($_GET['action']) && $_GET['action']==='metrics') {
   ]);
 }
 
-/* === Endpoint GET ?action=user_list (buscador en tiempo real) ===
-   - Compatible con MariaDB/MySQL sin COLLATE
-   - "Contiene" (case-insensitive) con INSTR(LOWER(...), ?)
-   - Soporta ID exacto, email, username, nombre, apellido y nombre completo
-*/
 if (isset($_GET['action']) && $_GET['action']==='user_list') {
   header('Cache-Control: no-store');
   $qRaw = (string)($_GET['q'] ?? '');
   $q = trim($qRaw);
-
   try {
-    // Buscar por ID exacto si es todo dígitos
     if ($q !== '' && ctype_digit($q)) {
       $st = $pdo->prepare(
         "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
@@ -136,12 +118,8 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
       $st->execute([(int)$q]);
       json_out(['ok'=>true,'items'=>$st->fetchAll(PDO::FETCH_ASSOC)]);
     }
-
     if ($q !== '') {
-      // Normaliza a minúsculas para comparación insensible a mayúsculas
       $needle = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
-
-      // OJO: placeholders posicionales (no nombrados repetidos)
       $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
               FROM users
               WHERE INSTR(LOWER(email), ?) > 0
@@ -159,27 +137,21 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
          FROM users ORDER BY id DESC LIMIT 50"
       );
     }
-
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     json_out(['ok'=>true,'items'=>$rows]);
-
   } catch (Throwable $e) {
-    // Log para diagnosticar si vuelve a fallar
     error_log('ADMIN user_list error: '.$e->getMessage());
     json_out(['ok'=>false,'error'=>'Error en la búsqueda'], 500);
   }
 }
 
-/* ========= ACTIONS (POST) ========= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
-
   if ($action === 'toggle_ip') {
     $val = setting_get('ip_block_enabled','1') === '1' ? '0' : '1';
     setting_set('ip_block_enabled', $val);
     exit('OK');
   }
-
   if ($action === 'set_smtp') {
     setting_set('smtp_host', $_POST['host'] ?? '');
     setting_set('smtp_port', $_POST['port'] ?? '587');
@@ -189,7 +161,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('smtp_name', $_POST['name'] ?? '');
     exit('OK');
   }
-
   if ($action === 'user_update') {
     try{
       $idSt = $pdo->prepare("SELECT id,email FROM users WHERE id=? LIMIT 1");
@@ -197,26 +168,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $idSt->execute([$id]);
       $row  = $idSt->fetch();
       if (!$row) exit('Usuario no existe');
-
       $isRootTarget = (defined('ROOT_ADMIN_EMAIL') && $row['email'] === ROOT_ADMIN_EMAIL);
       $isSelf       = ($id === $uid);
-
       $api   = trim($_POST['api_key'] ?? '');
       $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
       $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
       $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
-
       if ($isRootTarget || $isSelf) $adm = 1;
-
       $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?");
       $st->execute([$api, $adm, $dlx, $quota, $id]);
-
       exit('OK');
     }catch(Throwable $e){
       exit('Error al guardar');
     }
   }
-
   if ($action === 'user_delete') {
     try{
       $id = (int)($_POST['id'] ?? 0);
@@ -224,12 +189,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $row->execute([$id]);
       $row = $row->fetch();
       if (!$row) exit('Usuario no existe');
-
       if ((defined('ROOT_ADMIN_EMAIL') && $row['email'] === ROOT_ADMIN_EMAIL) || $id === $uid) {
         exit('No puedes eliminar al ROOT ni a ti mismo');
       }
-
-      // borrar archivos del usuario
       $st = $pdo->prepare("SELECT path FROM files WHERE user_id=?");
       $st->execute([$id]);
       foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $p) {
@@ -244,7 +206,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       exit('Error al eliminar');
     }
   }
-
   if ($action === 'mail_send') {
     $to  = trim($_POST['to'] ?? '');
     $sub = trim($_POST['subject'] ?? '(sin asunto)');
@@ -258,15 +219,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       exit($ok ? 'OK' : 'ERR: '.$err);
     }
   }
-
   exit;
 }
 
-/* ========= SSR (fallback inicial) ========= */
 $ipon = setting_get('ip_block_enabled','1') === '1';
 try{
-  $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                     FROM users ORDER BY id DESC LIMIT 50");
+  $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key FROM users ORDER BY id DESC LIMIT 50");
   $users = $st->fetchAll(PDO::FETCH_ASSOC);
 } catch(Throwable $e){ $users = []; }
 $smtp  = smtp_get();
@@ -277,32 +235,64 @@ $smtp  = smtp_get();
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel Admin — CDN</title>
 <style>
-  body{margin:0;background:#0b0b0d;color:#eaf2ff;font:15px/1.6 system-ui}
-  .wrap{max-width:1100px;margin:0 auto;padding:20px}
-  .card{background:#111827;border:1px solid #334155;border-radius:12px;padding:18px;margin-bottom:14px}
-  .input{width:100%;padding:10px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#eaf2ff}
-  .btn{display:inline-flex;background:linear-gradient(90deg,#0ea5e9,#22d3ee);color:#051425;border:none;border-radius:10px;padding:8px 12px;font-weight:800;cursor:pointer;text-decoration:none}
-  table{width:100%;border-collapse:collapse} td,th{border-bottom:1px solid #273042;padding:8px;vertical-align:middle}
-  a{color:#93c5fd}
-  label.small{font-size:12px;color:#94a3b8;margin-right:6px}
-  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .kpi{background:#0f172a;border:1px solid #273042;border-radius:12px;padding:10px}
+  :root{--bg:#0b0b0d;--card:#111827;--muted:#9fb0c9;--line:#273042;--line2:#334155;--txt:#eaf2ff;--brand1:#0ea5e9;--brand2:#22d3ee;--danger:#ef4444;--danger2:#b91c1c;--ok:#22c55e;--warn:#f59e0b;--paypal1:#0070ba;--paypal2:#003087;--stripe1:#635bff;--stripe2:#0a2540}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto}
+  .wrap{max-width:1160px;margin:0 auto;padding:20px}
+  h2{margin:0 0 12px 0;font-weight:800;letter-spacing:.2px}
+  .section-title{display:flex;align-items:center;gap:10px;margin:0 0 8px 0}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .card{background:var(--card);border:1px solid var(--line2);border-radius:14px;padding:18px;margin-bottom:14px}
+  .muted{color:var(--muted);font-size:13px}
+  .badge{display:inline-block;padding:2px 8px;border:1px solid var(--line2);border-radius:999px;background:#0f172a;font-size:12px;margin-left:6px}
+  .input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line2);background:#0f172a;color:var(--txt);outline:none}
+  .input:focus{border-color:var(--brand1);box-shadow:0 0 0 2px #0ea5e966}
+  .input-wrap{position:relative;display:flex;align-items:center}
+  .icon-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:1px solid var(--line);background:#0b1222;color:var(--txt);padding:6px 8px;border-radius:8px;cursor:pointer}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(90deg,var(--brand1),var(--brand2));color:#051425;border:none;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;transition:transform .05s ease,opacity .2s}
+  .btn:hover{transform:translateY(-1px)}
+  .btn.secondary{background:#0f172a;border:1px solid var(--line2);color:var(--txt)}
+  .btn.ghost{background:transparent;border:1px dashed var(--line2);color:var(--txt)}
+  .btn.danger{background:linear-gradient(90deg,var(--danger),var(--danger2));color:#fff}
+  .btn.paypal{background:linear-gradient(90deg,var(--paypal1),var(--paypal2));color:#fff}
+  .btn.stripe{background:linear-gradient(90deg,var(--stripe1),var(--stripe2));color:#fff}
+  .btn.block{display:flex;justify-content:center;width:100%}
+  .btn.small{padding:6px 10px;font-weight:700;border-radius:9px}
+  .spacer{height:10px}
+  .kpi{background:#0f172a;border:1px solid var(--line);border-radius:12px;padding:10px}
   .kpi h4{margin:2px 0 8px;font-size:14px;color:#93c5fd}
   canvas.spark{width:100%;height:120px;background:#0b1222;border-radius:8px}
-  .bar{height:16px;background:#0b1222;border-radius:999px;overflow:hidden;border:1px solid #273042}
-  .fill{height:100%;background:linear-gradient(90deg,#22d3ee,#0ea5e9)}
-  .muted{color:#9fb0c9;font-size:13px}
-  .badge{display:inline-block;padding:2px 8px;border:1px solid #334155;border-radius:999px;background:#0f172a;font-size:12px;margin-left:6px}
+  .bar{height:16px;background:#0b1222;border-radius:999px;overflow:hidden;border:1px solid var(--line)}
+  .fill{height:100%;background:linear-gradient(90deg,var(--brand2),var(--brand1))}
+  table{width:100%;border-collapse:collapse;min-width:920px}
+  th{font-size:12px;color:#a9bbd6;text-align:left}
+  td,th{border-bottom:1px solid var(--line);padding:8px;vertical-align:middle}
+  .actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .actions .btn.danger{margin-left:10px}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:#0f172a}
+  .brand-card{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand-card .txt{max-width:70%}
+  .brand-card .big{font-size:18px;font-weight:800;margin:0}
+  .brand-card .note{font-size:13px;color:var(--muted);margin:4px 0 0 0}
+  .brand-card .cta{min-width:180px}
+  .ip-toggle{display:flex;align-items:center;gap:10px}
+  @media (max-width:880px){
+    .grid-3{grid-template-columns:1fr}
+    .grid-2{grid-template-columns:1fr}
+    .brand-card{flex-direction:column;align-items:flex-start}
+    .brand-card .txt{max-width:100%}
+    .actions{gap:10px}
+  }
 </style>
 </head>
-<body><div class="wrap">
+<body>
+<div class="wrap">
   <h2>Panel Admin</h2>
 
-  <!-- MONITOREO EN TIEMPO REAL -->
   <div class="card">
-    <h3>Monitoreo del servidor</h3>
-    <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
-    <div class="grid3" style="margin-top:10px">
+    <div class="section-title"><h3 style="margin:0">Monitoreo del servidor</h3><span class="badge" id="metaUptime">Uptime — · Carga —</span></div>
+    <div class="grid-3" style="margin-top:10px">
       <div class="kpi">
         <h4>CPU</h4>
         <canvas id="cpuChart" class="spark" width="400" height="120"></canvas>
@@ -321,66 +311,91 @@ $smtp  = smtp_get();
     </div>
   </div>
 
-  <div class="card">
-    <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
-    <button class="btn" onclick="tgl()">Alternar</button>
-    <script>
-      async function tgl(){
-        const r=await fetch('admin.php',{method:'POST',body:new URLSearchParams({action:'toggle_ip'})});
-        alert(await r.text()); location.reload();
-      }
-    </script>
+  <div class="card ip-toggle">
+    <div><b>Bloqueo por IP:</b> <span id="ipstate"><?= $ipon ? 'ON' : 'OFF' ?></span></div>
+    <button class="btn small" onclick="tgl()">Alternar</button>
   </div>
 
-  <div class="card">
-    <h3>Pagos (PayPal)</h3>
-    <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
-    <a class="btn" href="admin_payments.php">Abrir configuración</a>
-  </div>
-<a class="btn" href="admin_stripe.php">💳 Configurar Stripe</a>
-  <div class="card">
-    <h3>SMTP</h3>
-    <form onsubmit="saveSMTP(event)">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div><label class="small">Host</label><input class="input" name="host" value="<?=h($smtp['host'])?>" placeholder="smtp.tu-dominio.com"></div>
-        <div><label class="small">Puerto</label><input class="input" name="port" value="<?=h($smtp['port'])?>" placeholder="587"></div>
-        <div><label class="small">Usuario</label><input class="input" name="user" value="<?=h($smtp['user'])?>" placeholder="correo@dominio.com"></div>
-        <div><label class="small">Contraseña</label><input class="input" name="pass" value="<?=h($smtp['pass'])?>" placeholder="••••••"></div>
-        <div><label class="small">From</label><input class="input" name="from" value="<?=h($smtp['from'])?>" placeholder="correo@dominio.com"></div>
-        <div><label class="small">Nombre remitente</label><input class="input" name="name" value="<?=h($smtp['name'])?>" placeholder="SkyUltraPlus"></div>
+  <div class="grid-2">
+    <div class="card brand-card" style="background:linear-gradient(180deg,#0f172a,#0f172a);border-color:#1f2a44">
+      <div class="txt">
+        <p class="big">PayPal</p>
+        <p class="note">Configura credenciales, datos de facturación y realiza pruebas de conexión.</p>
       </div>
-      <button class="btn" style="margin-top:8px">Guardar SMTP</button>
-    </form>
-    <script>
-      async function saveSMTP(e){
-        e.preventDefault();
-        const fd=new FormData(e.target); fd.append('action','set_smtp');
-        const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
-      }
-    </script>
+      <div class="cta">
+        <a class="btn paypal block" href="admin_payments.php">Configurar PayPal</a>
+      </div>
+    </div>
+    <div class="card brand-card" style="background:linear-gradient(180deg,#0f172a,#0f172a);border-color:#1f2a44">
+      <div class="txt">
+        <p class="big">Stripe</p>
+        <p class="note">Administra llaves y webhooks con un acceso más limpio y visible.</p>
+      </div>
+      <div class="cta">
+        <a class="btn stripe block" href="admin_stripe.php">Configurar Stripe</a>
+      </div>
+    </div>
   </div>
 
   <div class="card">
-    <h3>Enviar correo</h3>
+    <h3 style="margin:0 0 10px 0">SMTP</h3>
+    <form onsubmit="saveSMTP(event)">
+      <div class="grid-2" style="gap:10px">
+        <div>
+          <div class="muted" style="margin-bottom:4px">Host</div>
+          <input class="input" name="host" value="<?=h($smtp['host'])?>" placeholder="smtp.tu-dominio.com">
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:4px">Puerto</div>
+          <input class="input" name="port" value="<?=h($smtp['port'])?>" placeholder="587">
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:4px">Usuario (oculto)</div>
+          <div class="input-wrap">
+            <input class="input" id="smtp_user" name="user" type="password" value="<?=h($smtp['user'])?>" placeholder="correo@dominio.com">
+            <button type="button" class="icon-btn" onclick="toggleMask('smtp_user')">👁</button>
+          </div>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:4px">Contraseña (oculta)</div>
+          <div class="input-wrap">
+            <input class="input" id="smtp_pass" name="pass" type="password" value="<?=h($smtp['pass'])?>" placeholder="••••••">
+            <button type="button" class="icon-btn" onclick="toggleMask('smtp_pass')">👁</button>
+          </div>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:4px">From</div>
+          <input class="input" name="from" value="<?=h($smtp['from'])?>" placeholder="correo@dominio.com">
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:4px">Nombre remitente</div>
+          <input class="input" name="name" value="<?=h($smtp['name'])?>" placeholder="SkyUltraPlus">
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn">Guardar SMTP</button>
+      <button class="btn secondary" type="button" onclick="testSMTP()">Probar envío</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px 0">Enviar correo</h3>
     <form onsubmit="sendMail(event)">
       <input class="input" name="to" placeholder="Correo destino o * para todos" required>
       <input class="input" name="subject" placeholder="Asunto" style="margin-top:8px" required>
       <textarea class="input" name="message" placeholder="Mensaje HTML" style="margin-top:8px;height:120px" required></textarea>
-      <button class="btn" style="margin-top:8px">Enviar</button>
+      <div class="spacer"></div>
+      <div class="actions">
+        <button class="btn">Enviar</button>
+        <span class="muted">Usa * para enviar a todos los usuarios</span>
+      </div>
     </form>
-    <script>
-      async function sendMail(e){
-        e.preventDefault();
-        const fd=new FormData(e.target); fd.append('action','mail_send');
-        const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
-      }
-    </script>
   </div>
 
   <div class="card">
-    <h3>Usuarios</h3>
+    <h3 style="margin:0 0 10px 0">Usuarios</h3>
     <form id="searchForm" method="get" onsubmit="return false">
-      <input id="qAdmin" class="input" name="q" placeholder="Buscar por nombre, usuario o correo (en tiempo real)">
+      <input id="qAdmin" class="input" name="q" placeholder="Buscar por nombre, usuario o correo (tiempo real)">
     </form>
     <div style="overflow:auto;margin-top:8px">
       <table>
@@ -392,29 +407,24 @@ $smtp  = smtp_get();
         </thead>
         <tbody id="usersTbody">
           <?php foreach($users as $u): ?>
-            <?php
-              $isRoot = (defined('ROOT_ADMIN_EMAIL') && $u['email']===ROOT_ADMIN_EMAIL);
-              $isSelf = ($u['id']===$uid);
-            ?>
+            <?php $isRoot = (defined('ROOT_ADMIN_EMAIL') && $u['email']===ROOT_ADMIN_EMAIL); $isSelf = ($u['id']===$uid); ?>
             <tr>
               <td><?=$u['id']?></td>
               <td><?=h($u['username'])?></td>
               <td><?=h(trim(($u['first_name']??'').' '.($u['last_name']??'')))?></td>
               <td><?=h($u['email'])?> <?=$isSelf?'<span class="badge">tú</span>':''?></td>
               <td><?=$u['verified']?'✔️':'—'?></td>
-              <td>
-                <input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=($isRoot||$isSelf)?'disabled':''?>>
-              </td>
+              <td><input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=($isRoot||$isSelf)?'disabled':''?>></td>
               <td><input type="checkbox" id="dx<?=$u['id']?>" <?=$u['is_deluxe']?'checked':''?>></td>
               <td><input class="input" style="width:90px" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>"></td>
-              <td style="min-width:240px;display:flex;gap:6px;align-items:center">
+              <td style="min-width:260px;display:flex;gap:8px;align-items:center">
                 <input class="input" id="api<?=$u['id']?>" value="<?=h($u['api_key'])?>">
-                <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
+                <button class="btn small" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
               </td>
-              <td>
-                <button class="btn" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
+              <td class="actions">
+                <button class="btn small" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
                 <?php if(!$isRoot && !$isSelf): ?>
-                  <button class="btn" type="button" onclick="delu(<?=$u['id']?>)" style="background:#f87171;margin-left:6px">Eliminar</button>
+                  <button class="btn small danger" type="button" onclick="delu(<?=$u['id']?>)">Eliminar</button>
                 <?php endif; ?>
               </td>
             </tr>
@@ -425,137 +435,144 @@ $smtp  = smtp_get();
     </div>
   </div>
 
-  <p><a href="profile.php">Volver</a></p>
+  <p><a class="btn ghost" href="profile.php">Volver</a></p>
 </div>
 
 <script>
-/* ====== Monitor en tiempo real (CPU/RAM/Disco) ====== */
-const cpuC = document.getElementById('cpuChart').getContext('2d');
-const memC = document.getElementById('memChart').getContext('2d');
-const cpuArr = Array(60).fill(0);
-const memArr = Array(60).fill(0);
-function drawSpark(ctx, arr){
-  const w = ctx.canvas.width, h = ctx.canvas.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
-  const max = 100, step = w/(arr.length-1);
-  ctx.beginPath();
-  ctx.moveTo(0, h - (arr[0]/max)*h);
-  for(let i=1;i<arr.length;i++){
-    const x = i*step, y = h - (arr[i]/max)*h;
-    ctx.lineTo(x,y);
+  const cpuC = document.getElementById('cpuChart').getContext('2d');
+  const memC = document.getElementById('memChart').getContext('2d');
+  const cpuArr = Array(60).fill(0);
+  const memArr = Array(60).fill(0);
+  function drawSpark(ctx, arr){
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
+    const max = 100, step = w/(arr.length-1);
+    ctx.beginPath();
+    ctx.moveTo(0, h - (arr[0]/max)*h);
+    for(let i=1;i<arr.length;i++){
+      const x = i*step, y = h - (arr[i]/max)*h;
+      ctx.lineTo(x,y);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
-}
-function push(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
-async function poll(){
-  try{
-    const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
-    const j = await r.json();
-    push(cpuArr, Number(j.cpu_pct||0)); drawSpark(cpuC, cpuArr);
-    document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
-    const mp = Number(j.mem?.pct||0); push(memArr, mp); drawSpark(memC, memArr);
-    document.getElementById('memTxt').textContent = mp+'%';
-    document.getElementById('memDetail').textContent =
-      (fmtBytes(j.mem?.used||0))+' / '+(fmtBytes(j.mem?.total||0));
-    const dp = Number(j.disk?.pct||0);
-    document.getElementById('diskFill').style.width = dp+'%';
-    document.getElementById('diskTxt').textContent = dp+'%';
-    document.getElementById('diskDetail').textContent =
-      (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
-    document.getElementById('metaUptime').textContent =
-      `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
-  }catch(e){ }
-  setTimeout(poll, 2000);
-}
-function fmtBytes(b){
-  const u=['B','KB','MB','GB','TB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; }
-  return (b>=10?Math.round(b):Math.round(b*10)/10)+' '+u[i];
-}
-poll();
+  function pushVal(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
+  async function poll(){
+    try{
+      const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
+      const j = await r.json();
+      pushVal(cpuArr, Number(j.cpu_pct||0)); drawSpark(cpuC, cpuArr);
+      document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
+      const mp = Number(j.mem?.pct||0); pushVal(memArr, mp); drawSpark(memC, memArr);
+      document.getElementById('memTxt').textContent = mp+'%';
+      document.getElementById('memDetail').textContent = fmtBytes(j.mem?.used||0)+' / '+fmtBytes(j.mem?.total||0);
+      const dp = Number(j.disk?.pct||0);
+      document.getElementById('diskFill').style.width = dp+'%';
+      document.getElementById('diskTxt').textContent = dp+'%';
+      document.getElementById('diskDetail').textContent = fmtBytes(j.disk?.used||0)+' / '+fmtBytes(j.disk?.total||0);
+      document.getElementById('metaUptime').textContent = 'Uptime '+(j.uptime||'—')+' · Carga '+(j.load?.['1m']||0)+', '+(j.load?.['5m']||0)+', '+(j.load?.['15m']||0);
+    }catch(e){}
+    setTimeout(poll, 2000);
+  }
+  function fmtBytes(b){
+    const u=['B','KB','MB','GB','TB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; }
+    return (b>=10?Math.round(b):Math.round(b*10)/10)+' '+u[i];
+  }
+  poll();
 
-/* ====== Utilidades ====== */
-function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function rndKey(len=40){ const chars='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)]; return o; }
+  async function tgl(){
+    const r=await fetch('admin.php',{method:'POST',body:new URLSearchParams({action:'toggle_ip'})});
+    alert(await r.text()); location.reload();
+  }
+  function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function rndKey(len=40){ const chars='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)]; return o; }
+  function toggleMask(id){ const el=document.getElementById(id); if(!el) return; el.type = el.type==='password' ? 'text' : 'password'; }
 
-/* ====== Acciones fila ====== */
-function regen(id){ const inp=document.getElementById('api'+id); if(inp) inp.value=rndKey(40); }
-async function upd(id){
-  const fd=new FormData();
-  fd.append('action','user_update');
-  fd.append('id', id);
-  fd.append('api_key', document.getElementById('api'+id)?.value||'');
-  fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
-  fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
-  fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text()); 
-  runSearch(false);
-}
-async function delu(id){
-  if(!confirm('¿Eliminar usuario y sus archivos?')) return;
-  const fd=new FormData(); fd.append('action','user_delete'); fd.append('id',id);
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text());
-  runSearch(false);
-}
+  function regen(id){ const inp=document.getElementById('api'+id); if(inp) inp.value=rndKey(40); }
+  async function upd(id){
+    const fd=new FormData();
+    fd.append('action','user_update');
+    fd.append('id', id);
+    fd.append('api_key', document.getElementById('api'+id)?.value||'');
+    fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
+    fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
+    fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
+    const r=await fetch('admin.php',{method:'POST',body:fd});
+    alert(await r.text());
+    runSearch(false);
+  }
+  async function delu(id){
+    if(!confirm('¿Eliminar usuario y sus archivos?')) return;
+    const fd=new FormData(); fd.append('action','user_delete'); fd.append('id',id);
+    const r=await fetch('admin.php',{method:'POST',body:fd});
+    alert(await r.text());
+    runSearch(false);
+  }
 
-/* ====== Buscador en tiempo real ====== */
-const qAdmin = document.getElementById('qAdmin');
-const tbody  = document.getElementById('usersTbody');
-const hint   = document.getElementById('usersHint');
-let t=null, ctl=null;
+  const qAdmin = document.getElementById('qAdmin');
+  const tbody  = document.getElementById('usersTbody');
+  const hint   = document.getElementById('usersHint');
+  let t=null, ctl=null;
 
-function rowHtml(u, selfId, rootEmail){
-  const isSelf = (String(u.id)===String(selfId));
-  const isRoot = (rootEmail && u.email===rootEmail);
-  return `
-    <tr>
-      <td>${u.id}</td>
-      <td>${esc(u.username||'')}</td>
-      <td>${esc(((u.first_name||'')+' '+(u.last_name||'')).trim())}</td>
-      <td>${esc(u.email||'')}${isSelf? ' <span class="badge">tú</span>' : ''}</td>
-      <td>${u.verified ? '✔️' : '—'}</td>
-      <td><input type="checkbox" id="ad${u.id}" ${u.is_admin?'checked':''} ${(isRoot||isSelf)?'disabled':''}></td>
-      <td><input type="checkbox" id="dx${u.id}" ${u.is_deluxe?'checked':''}></td>
-      <td><input class="input" style="width:90px" type="number" id="qt${u.id}" value="${u.quota_limit}"></td>
-      <td style="min-width:240px;display:flex;gap:6px;align-items:center">
-        <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
-        <button class="btn" type="button" onclick="regen(${u.id})">🔁</button>
-      </td>
-      <td>
-        <button class="btn" type="button" onclick="upd(${u.id})">Guardar</button>
-        ${(!isRoot && !isSelf) ? `<button class="btn" type="button" onclick="delu(${u.id})" style="background:#f87171;margin-left:6px">Eliminar</button>`:''}
-      </td>
-    </tr>
-  `;
-}
+  function rowHtml(u, selfId, rootEmail){
+    const isSelf = (String(u.id)===String(selfId));
+    const isRoot = (rootEmail && u.email===rootEmail);
+    return `
+      <tr>
+        <td>${u.id}</td>
+        <td>${esc(u.username||'')}</td>
+        <td>${esc(((u.first_name||'')+' '+(u.last_name||'')).trim())}</td>
+        <td>${esc(u.email||'')}${isSelf? ' <span class="badge">tú</span>' : ''}</td>
+        <td>${u.verified ? '✔️' : '—'}</td>
+        <td><input type="checkbox" id="ad${u.id}" ${u.is_admin?'checked':''} ${(isRoot||isSelf)?'disabled':''}></td>
+        <td><input type="checkbox" id="dx${u.id}" ${u.is_deluxe?'checked':''}></td>
+        <td><input class="input" style="width:90px" type="number" id="qt${u.id}" value="${u.quota_limit}"></td>
+        <td style="min-width:260px;display:flex;gap:8px;align-items:center">
+          <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
+          <button class="btn small" type="button" onclick="regen(${u.id})">🔁</button>
+        </td>
+        <td class="actions">
+          <button class="btn small" type="button" onclick="upd(${u.id})">Guardar</button>
+          ${(!isRoot && !isSelf) ? `<button class="btn small danger" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
+        </td>
+      </tr>
+    `;
+  }
 
-async function runSearch(showLoading=true){
-  const q = (qAdmin?.value||'').trim();
-  if (ctl) ctl.abort(); ctl = new AbortController();
-  try{
-    if (showLoading && hint) hint.textContent='Buscando…';
-    const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {
-      signal: ctl.signal,
-      cache:'no-store',
-      headers:{'Accept':'application/json'}
-    });
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error||'Error en búsqueda');
-    const items = j.items||[];
-    const rootEmail = <?= defined('ROOT_ADMIN_EMAIL') ? json_encode(ROOT_ADMIN_EMAIL) : 'null' ?>;
-    tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
-    if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
-  }catch(e){
-    if (e.name !== 'AbortError') {
-      if (hint) hint.textContent='Error al buscar.';
+  async function runSearch(showLoading=true){
+    const q = (qAdmin?.value||'').trim();
+    if (ctl) ctl.abort(); ctl = new AbortController();
+    try{
+      if (showLoading && hint) hint.textContent='Buscando…';
+      const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {
+        signal: ctl.signal,
+        cache:'no-store',
+        headers:{'Accept':'application/json'}
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error||'Error en búsqueda');
+      const items = j.items||[];
+      const rootEmail = <?= defined('ROOT_ADMIN_EMAIL') ? json_encode(ROOT_ADMIN_EMAIL) : 'null' ?>;
+      tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
+      if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
+    }catch(e){
+      if (e.name !== 'AbortError') { if (hint) hint.textContent='Error al buscar.'; }
     }
   }
-}
-function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
-qAdmin?.addEventListener('input', deb);
-runSearch(false);
+  function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
+  qAdmin?.addEventListener('input', deb);
+  runSearch(false);
+
+  async function saveSMTP(e){
+    e.preventDefault();
+    const fd=new FormData(e.target); fd.append('action','set_smtp');
+    const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
+  }
+  async function testSMTP(){
+    const to=prompt('Correo destino para prueba:'); if(!to) return;
+    const fd=new FormData(); fd.append('action','mail_send'); fd.append('to',to); fd.append('subject','Prueba SMTP'); fd.append('message','<b>Prueba OK</b>');
+    const r=await fetch('admin.php',{method:'POST',body:fd}); alert(await r.text());
+  }
 </script>
 </body>
 </html>
