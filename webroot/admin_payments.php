@@ -65,23 +65,108 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pagos (PayPal) — Admin</title>
 <style>
-  body{margin:0;background:#0b0b0d;color:#eaf2ff;font:15px/1.6 system-ui}
-  .wrap{max-width:900px;margin:0 auto;padding:20px}
-  .card{background:#111827;border:1px solid #334155;border-radius:12px;padding:18px;margin-bottom:14px}
-  .input{width:100%;padding:10px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#eaf2ff}
-  .btn{display:inline-flex;background:linear-gradient(90deg,#0ea5e9,#22d3ee);color:#051425;border:none;border-radius:10px;padding:8px 12px;font-weight:800;cursor:pointer;text-decoration:none}
-  label.small{font-size:12px;color:#94a3b8;margin:0 0 4px;display:block}
-  .grid{display:grid;gap:10px}
-  @media(min-width:760px){.grid-2{grid-template-columns:1fr 1fr}}
-  .muted{color:#9fb0c9}
-  code{background:#0f172a;border:1px solid #334155;border-radius:6px;padding:2px 6px}
+  :root{
+    /* Paleta */
+    --bg:#0b0b0d;
+    --ink:#eaf2ff;
+    --ink-dim:#cfd8ee;
+    --muted:#a6b4cf;
+    --line:#2a3346;
+    --card:#111827;
+
+    /* Degradados rojo → rosado → azul */
+    --r:#ef4444;   /* rojo */
+    --p:#ec4899;   /* rosado */
+    --b:#3b82f6;   /* azul */
+    --btn-grad: linear-gradient(90deg, var(--r), var(--p), var(--b));
+    --btn-grad-hover: linear-gradient(90deg, #f05252, #f472b6, #60a5fa);
+
+    /* Extras */
+    --radius:12px;
+    --shadow: 0 10px 30px rgba(59,130,246,.15);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    color:var(--ink);
+    background:
+      radial-gradient(800px 420px at 110% -10%, rgba(239,68,68,.18), transparent 55%),
+      radial-gradient(700px 400px at -10% 110%, rgba(59,130,246,.16), transparent 55%),
+      linear-gradient(160deg, rgba(236,72,153,.12), rgba(59,130,246,.08)),
+      var(--bg);
+    font:15px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+
+  a{color:#9ec1ff;text-decoration:none}
+  a:hover{opacity:.9}
+
+  .wrap{max-width:960px;margin:0 auto;padding:20px}
+
+  /* Tarjetas y tipografía */
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px;
+    margin-bottom:16px;
+    box-shadow:var(--shadow);
+  }
+  h2{margin:0 0 6px}
+  h3{margin:0 0 12px}
+  h4{margin:14px 0 8px}
+  .muted{color:var(--muted)}
+  code{
+    background:#0f172a;border:1px solid var(--line);border-radius:8px;padding:2px 6px;color:var(--ink-dim)
+  }
+
+  /* Formulario */
+  .grid{display:grid;gap:12px}
+  .grid-2{grid-template-columns:1fr}
+  @media(min-width:760px){ .grid-2{grid-template-columns:1fr 1fr} }
+
+  label.small{font-size:12px;color:#94a3b8;margin:0 0 6px;display:block}
+  .input, select.input{
+    width:100%;padding:12px;border-radius:10px;
+    border:1px solid var(--line);background:#0f172a;color:var(--ink);
+    outline: none;
+  }
+  .input:focus, select.input:focus{border-color:#6ea8ff; box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+
+  /* Botones */
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--btn-grad);
+    color:#061120;border:none;border-radius:10px;
+    padding:10px 14px;font-weight:800;cursor:pointer;
+    text-decoration:none; transition:.15s ease-in-out;
+  }
+  .btn:hover{background:var(--btn-grad-hover); transform: translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.ghost{
+    background:transparent;color:var(--ink);
+    border:1px solid var(--line); font-weight:700;
+  }
+
+  /* Encabezados / separadores */
+  .bar-top{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+    margin-bottom:8px
+  }
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;
+    background:#0f172a;border:1px solid var(--line);color:var(--ink-dim);
+    padding:6px 10px;border-radius:999px;font-size:12px
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <h2>Pagos (PayPal)</h2>
-  <p><a href="admin.php" style="color:#93c5fd">← Volver al Panel Admin</a></p>
+  <div class="bar-top">
+    <h2>Pagos (PayPal)</h2>
+    <a href="admin.php" class="btn ghost">← Volver al Panel</a>
+  </div>
 
   <div class="card">
     <h3>Credenciales</h3>
@@ -109,7 +194,7 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
         </div>
       </div>
 
-      <h4 style="margin-top:16px">Datos para facturas</h4>
+      <h4 style="margin-top:6px">Datos para facturas</h4>
       <div class="grid grid-2">
         <div>
           <label class="small">Nombre de negocio</label>
@@ -125,13 +210,13 @@ $webhook_url = ($host ? 'https://'.$host : '').'/paypal_webhook.php';
         </div>
       </div>
 
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn">Guardar</button>
         <button class="btn" type="button" onclick="testCfg()">Probar credenciales</button>
       </div>
     </form>
 
-    <p class="muted" style="margin-top:10px">
+    <p class="muted" style="margin-top:12px">
       Webhook recomendado: <code><?=htmlspecialchars($webhook_url)?></code><br>
       Eventos: <code>PAYMENT.CAPTURE.COMPLETED</code> y <code>CHECKOUT.ORDER.APPROVED</code>.
     </p>
