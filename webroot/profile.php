@@ -347,25 +347,51 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   <?php endif; ?>
 
 
-<!-- ====== Pagar con tarjeta (Stripe) - Tarjetas con logos ====== -->
+<!-- ====== Pagar con tarjeta (Stripe) — tarjetas al estilo PayPal ====== -->
 <div class="card">
   <h3>Pagar con tarjeta (Stripe)</h3>
 
   <style>
-    .plansGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px}
-    .planCard{background:#0f172a;border:1px solid #334155;border-radius:16px;padding:16px;text-align:center}
-    .planCard .brandTop{display:flex;justify-content:center;align-items:center;margin-bottom:6px}
-    .planCard .brandTop img{height:42px;max-width:120px;object-fit:contain;filter:drop-shadow(0 0 10px rgba(255,255,255,.05))}
-    .planCard .title{font-size:22px;font-weight:800;margin:6px 0}
-    .planCard .price{font-size:22px;font-weight:900;margin:10px 0}
-    .planCard .btn{width:100%;justify-content:center}
-    .planCard .sub{color:#9fb0c9;font-size:13px;margin-top:10px;display:flex;gap:6px;align-items:center;justify-content:center}
-    .planCard .sub img{height:18px;width:auto;object-fit:contain;opacity:.95}
-    .planCard.disabled{opacity:.6}
+    /* Grid compacto y tarjetas angostas tipo PayPal */
+    .stripePlans{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+      gap:12px;
+      margin-top:10px;
+    }
+    .stripeCard{
+      background:#0f172a;
+      border:1px solid #334155;
+      border-radius:16px;
+      padding:16px;
+      text-align:center;
+      /* clave: limita ancho para que no se estiren */
+      max-width:260px;
+      margin-inline:auto;
+    }
+    .stripeCard .brandTop{
+      display:flex;justify-content:center;align-items:center;margin-bottom:6px
+    }
+    /* Logo Sky más grande (similar PayPal) */
+    .stripeCard .brandTop img{
+      height:56px;                 /* <- ajusta si lo quieres aún más grande */
+      max-width:140px;
+      object-fit:contain;
+      filter:drop-shadow(0 0 10px rgba(255,255,255,.05));
+    }
+    .stripeCard .title{font-size:22px;font-weight:800;margin:8px 0}
+    .stripeCard .price{font-size:22px;font-weight:900;margin:10px 0}
+    .stripeCard .btn{width:100%;justify-content:center}
+    /* Marca Stripe: logo arriba y texto debajo */
+    .stripeCard .stripeMark{
+      color:#9fb0c9;font-size:13px;margin-top:10px;
+      display:flex;flex-direction:column;align-items:center;gap:4px
+    }
+    .stripeCard .stripeMark img{height:22px;width:auto;object-fit:contain;opacity:.95}
+    .stripeCard.disabled{opacity:.6}
   </style>
 
   <?php
-    // Textos visibles (no afectan la lógica de cobro)
     $stripePlans = [
       ['code'=>'PLUS50',  'title'=>'+50 archivos',  'price'=>'$1.37'],
       ['code'=>'PLUS120', 'title'=>'+120 archivos', 'price'=>'$2.45'],
@@ -375,16 +401,16 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
     $logoStripe = 'https://cdn.skyultraplus.com/uploads/u3/9ebb61359445e3db.png';
   ?>
 
-  <div class="plansGrid">
+  <div class="stripePlans">
     <?php foreach($stripePlans as $p): ?>
-      <div class="planCard">
+      <div class="stripeCard">
         <div class="brandTop">
           <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
         </div>
         <div class="title"><?=htmlspecialchars($p['title'])?></div>
         <div class="price"><?=htmlspecialchars($p['price'])?></div>
         <a class="btn" href="stripe_checkout.php?plan=<?=urlencode($p['code'])?>">Pagar con tarjeta</a>
-        <div class="sub">
+        <div class="stripeMark">
           <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
           <span>Procesado por Stripe</span>
         </div>
@@ -392,27 +418,27 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
     <?php endforeach; ?>
 
     <?php if (empty($me['is_deluxe'])): ?>
-      <div class="planCard">
+      <div class="stripeCard">
         <div class="brandTop">
           <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
         </div>
         <div class="title">Plan Deluxe</div>
         <div class="price">$5.00 <span style="font-weight:700;font-size:14px">(pago único)</span></div>
         <a class="btn" href="stripe_checkout.php?plan=DELUXE">Pagar con tarjeta</a>
-        <div class="sub">
+        <div class="stripeMark">
           <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
           <span>Procesado por Stripe</span>
         </div>
       </div>
     <?php else: ?>
-      <div class="planCard disabled">
+      <div class="stripeCard disabled">
         <div class="brandTop">
           <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
         </div>
         <div class="title">Plan Deluxe</div>
         <div class="price">$5.00 <span style="font-weight:700;font-size:14px">(pago único)</span></div>
-        <div class="sub" style="margin-top:14px;font-weight:700">Ya eres Deluxe 💎</div>
-        <div class="sub">
+        <div style="margin-top:14px;font-weight:700">Ya eres Deluxe 💎</div>
+        <div class="stripeMark">
           <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
           <span>Procesado por Stripe</span>
         </div>
