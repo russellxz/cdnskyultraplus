@@ -345,6 +345,23 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
       <p class="muted">Configura PayPal en <a class="btn btn-sm ghost" href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
     </div>
   <?php endif; ?>
+<!-- ===== Stripe: pago con tarjeta (botones) ===== -->
+<div class="card">
+  <h3>Pagar con tarjeta (Stripe)</h3>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap">
+    <a class="btn" href="stripe_checkout.php?plan=PLUS50">PLUS50 — pagar con tarjeta</a>
+    <a class="btn" href="stripe_checkout.php?plan=PLUS120">PLUS120 — pagar con tarjeta</a>
+    <a class="btn" href="stripe_checkout.php?plan=PLUS250">PLUS250 — pagar con tarjeta</a>
+
+    <?php if (empty($me['is_deluxe'])): ?>
+      <a class="btn" href="stripe_checkout.php?plan=DELUXE">DELUXE (de por vida) — pagar con tarjeta</a>
+    <?php endif; ?>
+  </div>
+
+  <p class="muted" style="margin-top:6px">Procesado por Stripe.</p>
+</div>
+<!-- ===== /Stripe ===== -->
 
 </div>
 
