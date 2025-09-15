@@ -124,8 +124,9 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
   try {
     if ($q !== '' && ctype_digit($q)) {
       $st = $pdo->prepare(
-        "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-         FROM users WHERE id=? LIMIT 1"
+        "SELECT u.id,u.email,u.username,u.first_name,u.last_name,u.is_admin,u.is_deluxe,u.quota_limit,u.verified,u.api_key,
+                (SELECT COUNT(*) FROM files f WHERE f.user_id=u.id) AS used_files
+         FROM users u WHERE u.id=? LIMIT 1"
       );
       $st->execute([(int)$q]);
       json_out(['ok'=>true,'items'=>$st->fetchAll(PDO::FETCH_ASSOC)]);
@@ -133,21 +134,23 @@ if (isset($_GET['action']) && $_GET['action']==='user_list') {
 
     if ($q !== '') {
       $needle = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
-      $sql = "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-              FROM users
-              WHERE INSTR(LOWER(email), ?) > 0
-                 OR INSTR(LOWER(username), ?) > 0
-                 OR INSTR(LOWER(first_name), ?) > 0
-                 OR INSTR(LOWER(last_name), ?) > 0
-                 OR INSTR(LOWER(CONCAT_WS(' ', first_name, last_name)), ?) > 0
-              ORDER BY id DESC
+      $sql = "SELECT u.id,u.email,u.username,u.first_name,u.last_name,u.is_admin,u.is_deluxe,u.quota_limit,u.verified,u.api_key,
+                     (SELECT COUNT(*) FROM files f WHERE f.user_id=u.id) AS used_files
+              FROM users u
+              WHERE INSTR(LOWER(u.email), ?) > 0
+                 OR INSTR(LOWER(u.username), ?) > 0
+                 OR INSTR(LOWER(u.first_name), ?) > 0
+                 OR INSTR(LOWER(u.last_name), ?) > 0
+                 OR INSTR(LOWER(CONCAT_WS(' ', u.first_name, u.last_name)), ?) > 0
+              ORDER BY u.id DESC
               LIMIT 200";
       $st = $pdo->prepare($sql);
       $st->execute([$needle, $needle, $needle, $needle, $needle]);
     } else {
       $st = $pdo->query(
-        "SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-         FROM users ORDER BY id DESC LIMIT 50"
+        "SELECT u.id,u.email,u.username,u.first_name,u.last_name,u.is_admin,u.is_deluxe,u.quota_limit,u.verified,u.api_key,
+                (SELECT COUNT(*) FROM files f WHERE f.user_id=u.id) AS used_files
+         FROM users u ORDER BY u.id DESC LIMIT 50"
       );
     }
 
@@ -255,8 +258,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 /* ========= SSR (fallback inicial) ========= */
 $ipon = setting_get('ip_block_enabled','1') === '1';
 try{
-  $st = $pdo->query("SELECT id,email,username,first_name,last_name,is_admin,is_deluxe,quota_limit,verified,api_key
-                     FROM users ORDER BY id DESC LIMIT 50");
+  $st = $pdo->query("SELECT u.id,u.email,u.username,u.first_name,u.last_name,u.is_admin,u.is_deluxe,u.quota_limit,u.verified,u.api_key,
+                            (SELECT COUNT(*) FROM files f WHERE f.user_id=u.id) AS used_files
+                     FROM users u ORDER BY u.id DESC LIMIT 50");
   $users = $st->fetchAll(PDO::FETCH_ASSOC);
 } catch(Throwable $e){ $users = []; }
 $smtp  = smtp_get();
@@ -342,13 +346,20 @@ table input[type="number"]{width:110px}
 /* SMTP password/user con ojo */
 .pwwrap{display:flex;gap:8px;align-items:center}
 .pwbtn{min-width:40px;padding:8px}
+
+/* === NUEVO: estilos cuota/“restantes” === */
+.quota-wrap{min-width:180px}
+.quota-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.input-narrow{width:100px;text-align:right}
+.quota-meta{font-size:12px;color:#9fb0c9;margin-top:4px}
 </style>
 </head>
+
 <body>
 <div class="wrap">
   <h2>Panel Admin</h2>
 
-<!-- MONITOREO EN TIEMPO REAL -->
+  <!-- MONITOREO EN TIEMPO REAL -->
   <div class="card">
     <h3>Monitoreo del servidor</h3>
     <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
@@ -372,7 +383,7 @@ table input[type="number"]{width:110px}
   </div>
 
   <div class="card">
-    <b>Bloqueo por IP:</b> <span id="ipstate"><?=$ipon?'ON':'OFF'?></span>
+    <b>Bloqueo por IP:</b> <span id="ipstate"><?= $ipon ? 'ON' : 'OFF' ?></span>
     <button class="btn" onclick="tgl()">Alternar</button>
     <script>
       async function tgl(){
@@ -427,8 +438,7 @@ table input[type="number"]{width:110px}
     </script>
   </div>
 
-
-<div class="card">
+  <div class="card">
     <h3>Enviar correo</h3>
     <form onsubmit="sendMail(event)">
       <input class="input" name="to" placeholder="Correo destino o * para todos" required>
@@ -463,6 +473,8 @@ table input[type="number"]{width:110px}
             <?php
               $isRoot = (defined('ROOT_ADMIN_EMAIL') && $u['email']===ROOT_ADMIN_EMAIL);
               $isSelf = ($u['id']===$uid);
+              $used   = (int)($u['used_files'] ?? 0);
+              $rest   = max(0, (int)$u['quota_limit'] - $used);
             ?>
             <tr>
               <td><?=$u['id']?></td>
@@ -474,7 +486,19 @@ table input[type="number"]{width:110px}
                 <input type="checkbox" id="ad<?=$u['id']?>" <?=$u['is_admin']?'checked':''?> <?=($isRoot||$isSelf)?'disabled':''?>>
               </td>
               <td><input type="checkbox" id="dx<?=$u['id']?>" <?=$u['is_deluxe']?'checked':''?>></td>
-              <td><input class="input" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>"></td>
+
+              <!-- Quota: límite + Restantes + Fijar, y meta Usados/Restan -->
+              <td class="quota-wrap">
+                <div class="quota-row">
+                  <input class="input input-narrow" type="number" id="qt<?=$u['id']?>" value="<?=$u['quota_limit']?>"
+                         title="Límite total (no restantes)" min="0" step="1" inputmode="numeric">
+                  <input class="input input-narrow" type="number" id="rm<?=$u['id']?>" placeholder="Restantes"
+                         title="Fijar restantes y guardar" data-used="<?=$used?>" min="0" step="1" inputmode="numeric">
+                  <button class="btn" type="button" onclick="setRemaining(<?=$u['id']?>, <?=$used?>)">Fijar</button>
+                </div>
+                <div class="quota-meta">Usados: <b><?=$used?></b> · Restan: <b><?=$rest?></b></div>
+              </td>
+
               <td style="min-width:240px;display:flex;gap:6px;align-items:center">
                 <input class="input" id="api<?=$u['id']?>" value="<?=h($u['api_key'])?>">
                 <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
@@ -496,136 +520,4 @@ table input[type="number"]{width:110px}
   <p><a href="profile.php">Volver</a></p>
 </div>
 
-<script>
-/* ====== Monitor en tiempo real (CPU/RAM/Disco) ====== */
-const cpuC = document.getElementById('cpuChart').getContext('2d');
-const memC = document.getElementById('memChart').getContext('2d');
-const cpuArr = Array(60).fill(0);
-const memArr = Array(60).fill(0);
-function drawSpark(ctx, arr){
-  const w = ctx.canvas.width, h = ctx.canvas.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.lineWidth = 2; ctx.strokeStyle = '#60a5fa';
-  const max = 100, step = w/(arr.length-1);
-  ctx.beginPath();
-  ctx.moveTo(0, h - (arr[0]/max)*h);
-  for(let i=1;i<arr.length;i++){
-    const x = i*step, y = h - (arr[i]/max)*h;
-    ctx.lineTo(x,y);
-  }
-  ctx.stroke();
-}
-function push(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
-async function poll(){
-  try{
-    const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
-    const j = await r.json();
-    push(cpuArr, Number(j.cpu_pct||0)); drawSpark(cpuC, cpuArr);
-    document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
-    const mp = Number(j.mem?.pct||0); push(memArr, mp); drawSpark(memC, memArr);
-    document.getElementById('memTxt').textContent = mp+'%';
-    document.getElementById('memDetail').textContent =
-      (fmtBytes(j.mem?.used||0))+' / '+(fmtBytes(j.mem?.total||0));
-    const dp = Number(j.disk?.pct||0);
-    document.getElementById('diskFill').style.width = dp+'%';
-    document.getElementById('diskTxt').textContent = dp+'%';
-    document.getElementById('diskDetail').textContent =
-      (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
-    document.getElementById('metaUptime').textContent =
-      `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
-  }catch(e){ }
-  setTimeout(poll, 2000);
-}
-function fmtBytes(b){
-  const u=['B','KB','MB','GB','TB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; }
-  return (b>=10?Math.round(b):Math.round(b*10)/10)+' '+u[i];
-}
-poll();
-
-/* ====== Utilidades ====== */
-function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function rndKey(len=40){ const chars='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)]; return o; }
-function toggleEye(id){ const i=document.getElementById(id); if(!i) return; i.type = (i.type==='password'?'text':'password'); }
-
-/* ====== Acciones fila ====== */
-function regen(id){ const inp=document.getElementById('api'+id); if(inp) inp.value=rndKey(40); }
-async function upd(id){
-  const fd=new FormData();
-  fd.append('action','user_update');
-  fd.append('id', id);
-  fd.append('api_key', document.getElementById('api'+id)?.value||'');
-  fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
-  fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
-  fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text());
-  runSearch(false);
-}
-async function delu(id){
-  if(!confirm('¿Eliminar usuario y sus archivos?')) return;
-  const fd=new FormData(); fd.append('action','user_delete'); fd.append('id',id);
-  const r=await fetch('admin.php',{method:'POST',body:fd});
-  alert(await r.text());
-  runSearch(false);
-}
-
-/* ====== Buscador en tiempo real ====== */
-const qAdmin = document.getElementById('qAdmin');
-const tbody  = document.getElementById('usersTbody');
-const hint   = document.getElementById('usersHint');
-let t=null, ctl=null;
-
-function rowHtml(u, selfId, rootEmail){
-  const isSelf = (String(u.id)===String(selfId));
-  const isRoot = (rootEmail && u.email===rootEmail);
-  return `
-    <tr>
-      <td>${u.id}</td>
-      <td>${esc(u.username||'')}</td>
-      <td>${esc(((u.first_name||'')+' '+(u.last_name||'')).trim())}</td>
-      <td>${esc(u.email||'')}${isSelf? ' <span class="badge">tú</span>' : ''}</td>
-      <td>${u.verified ? '✔️' : '—'}</td>
-      <td><input type="checkbox" id="ad${u.id}" ${u.is_admin?'checked':''} ${(isRoot||isSelf)?'disabled':''}></td>
-      <td><input type="checkbox" id="dx${u.id}" ${u.is_deluxe?'checked':''}></td>
-      <td><input class="input" type="number" id="qt${u.id}" value="${u.quota_limit}"></td>
-      <td style="min-width:240px;display:flex;gap:6px;align-items:center">
-        <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
-        <button class="btn" type="button" onclick="regen(${u.id})">🔁</button>
-      </td>
-      <td>
-        <button class="btn" type="button" onclick="upd(${u.id})">Guardar</button>
-        ${(!isRoot && !isSelf) ? `<button class="btn danger" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
-      </td>
-    </tr>
-  `;
-}
-
-async function runSearch(showLoading=true){
-  const q = (qAdmin?.value||'').trim();
-  if (ctl) ctl.abort(); ctl = new AbortController();
-  try{
-    if (showLoading && hint) hint.textContent='Buscando…';
-    const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {
-      signal: ctl.signal,
-      cache:'no-store',
-      headers:{'Accept':'application/json'}
-    });
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error||'Error en búsqueda');
-    const items = j.items||[];
-    const rootEmail = <?= defined('ROOT_ADMIN_EMAIL') ? json_encode(ROOT_ADMIN_EMAIL) : 'null' ?>;
-    tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
-    if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
-  }catch(e){
-    if (e.name !== 'AbortError') {
-      if (hint) hint.textContent='Error al buscar.';
-    }
-  }
-}
-function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
-qAdmin?.addEventListener('input', deb);
-runSearch(false);
-</script>
-</body>
-</html>
 
