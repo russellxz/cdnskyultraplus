@@ -1,11 +1,17 @@
 <?php
 require_once __DIR__.'/db.php';
 
+/* Cargar el autoloader de Composer si existe (para detectar stripe/stripe-php) */
+$autoload = __DIR__ . '/vendor/autoload.php';
+if (is_file($autoload)) {
+  require_once $autoload;
+}
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 
-// Verifica admin
+/* Verifica admin */
 try {
   $st = $pdo->prepare("SELECT is_admin FROM users WHERE id=? LIMIT 1");
   $st->execute([$uid]);
@@ -14,6 +20,20 @@ try {
 
 function h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
 
+/* --------- BASE URL y Webhook URL correctos --------- */
+function compute_base_url(): string {
+  if (defined('BASE_URL') && BASE_URL) return rtrim(BASE_URL, '/');
+  $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? null) == 443);
+  $scheme = $https ? 'https' : 'http';
+  $host   = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
+  $base   = dirname($_SERVER['SCRIPT_NAME'] ?? '/');
+  $base   = rtrim(str_replace('\\','/', $base), '/');
+  if ($base === '/') $base = ''; // si está en raíz
+  return $scheme.'://'.$host.$base;
+}
+$webhookURL = compute_base_url().'/stripe_webhook.php';
+
+/* --------- Guardado --------- */
 $ok = ''; $err = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   // CSRF
@@ -39,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 }
 
-// Carga config actual
+/* --------- Carga config actual --------- */
 $cfg = [
   'pub'    => setting_get('stripe_public', ''),
   'sec'    => setting_get('stripe_secret', ''),
@@ -52,12 +72,7 @@ $cfg = [
 
 $_SESSION['csrf_stripe'] = bin2hex(random_bytes(16));
 
-// URL recomendada del webhook
-$webhookURL = defined('BASE_URL')
-  ? rtrim(BASE_URL, '/').'/stripe_webhook.php'
-  : 'https://tu-dominio/stripe_webhook.php';
-
-// SDK check (opcional)
+/* SDK check (mostramos aviso si no está instalado) */
 $hasSdk = class_exists('\Stripe\StripeClient');
 ?>
 <!doctype html>
@@ -90,10 +105,13 @@ $hasSdk = class_exists('\Stripe\StripeClient');
   <div class="card">
     <h2>Configurar Stripe</h2>
     <p class="muted">
-      Añade tus claves y los <b>Price IDs</b> de tus planes. El <b>Webhook</b> debe apuntar a: <code><?=h($webhookURL)?></code><br>
+      Añade tus claves y los <b>Price IDs</b> de tus planes. El <b>Webhook</b> debe apuntar a:
+      <code><?=h($webhookURL)?></code><br>
       Habilita el evento <code>checkout.session.completed</code> en Stripe. (El cumplimiento se hace en <code>stripe_webhook.php</code>).
     </p>
-    <p class="muted">SDK PHP: <?= $hasSdk ? '✅ Detectado (stripe/stripe-php)' : '⚠️ No detectado. Instala con <code>composer require stripe/stripe-php</code>' ?></p>
+    <p class="muted">SDK PHP:
+      <?= $hasSdk ? '✅ Detectado (stripe/stripe-php)' : '⚠️ No detectado. Instala con <code>composer require stripe/stripe-php</code>' ?>
+    </p>
 
     <?php if($ok): ?><div class="ok"><?=$ok?></div><?php endif; ?>
     <?php if($err): ?><div class="err"><?=$err?></div><?php endif; ?>
@@ -122,7 +140,8 @@ $hasSdk = class_exists('\Stripe\StripeClient');
           <button type="button" class="btn" onclick="tgl('wh')">👁️</button>
         </div>
         <p class="muted" style="margin-top:6px">
-          En el Dashboard de Stripe → Developers → Webhooks → Add endpoint → URL: <code><?=h($webhookURL)?></code> → Events: <code>checkout.session.completed</code> → copia el <b>Signing secret</b>.
+          En el Dashboard de Stripe → Developers → Webhooks → Add endpoint → URL:
+          <code><?=h($webhookURL)?></code> → Events: <code>checkout.session.completed</code> → copia el <b>Signing secret</b>.
         </p>
       </div>
 
