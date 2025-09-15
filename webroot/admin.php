@@ -520,4 +520,171 @@ table input[type="number"]{width:110px}
   <p><a href="profile.php">Volver</a></p>
 </div>
 
+<script>
+/* ====== Monitor en tiempo real (CPU/RAM/Disco) ====== */
+const cpuC = document.getElementById('cpuChart').getContext('2d');
+const memC = document.getElementById('memChart').getContext('2d');
+const cpuArr = Array(60).fill(0);
+const memArr = Array(60).fill(0);
+function drawSpark(ctx, arr){
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.lineWidth = 2; ctx.strokeStyle = '#60a5fa';
+  const max = 100, step = w/(arr.length-1);
+  ctx.beginPath();
+  ctx.moveTo(0, h - (arr[0]/max)*h);
+  for(let i=1;i<arr.length;i++){
+    const x = i*step, y = h - (arr[i]/max)*h;
+    ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+function push(arr, v){ arr.push(v); while(arr.length>60) arr.shift(); }
+async function poll(){
+  try{
+    const r = await fetch('admin.php?action=metrics', {cache:'no-store'});
+    const j = await r.json();
+    push(cpuArr, Number(j.cpu_pct||0)); drawSpark(cpuC, cpuArr);
+    document.getElementById('cpuTxt').textContent = (j.cpu_pct??0)+'%';
+    const mp = Number(j.mem?.pct||0); push(memArr, mp); drawSpark(memC, memArr);
+    document.getElementById('memTxt').textContent = mp+'%';
+    document.getElementById('memDetail').textContent =
+      (fmtBytes(j.mem?.used||0))+' / '+(fmtBytes(j.mem?.total||0));
+    const dp = Number(j.disk?.pct||0);
+    document.getElementById('diskFill').style.width = dp+'%';
+    document.getElementById('diskTxt').textContent = dp+'%';
+    document.getElementById('diskDetail').textContent =
+      (fmtBytes(j.disk?.used||0))+' / '+(fmtBytes(j.disk?.total||0));
+    document.getElementById('metaUptime').textContent =
+      `Uptime: ${j.uptime||'—'} · Carga: ${j.load?.['1m']||0}, ${j.load?.['5m']||0}, ${j.load?.['15m']||0}`;
+  }catch(e){ }
+  setTimeout(poll, 2000);
+}
+function fmtBytes(b){
+  const u=['B','KB','MB','GB','TB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; }
+  return (b>=10?Math.round(b):Math.round(b*10)/10)+' '+u[i];
+}
+poll();
 
+/* ====== Utilidades ====== */
+function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function rndKey(len=40){ const chars='abcdef0123456789'; let o=''; for(let i=0;i<len;i++) o+=chars[Math.floor(Math.random()*chars.length)]; return o; }
+function toggleEye(id){ const i=document.getElementById(id); if(!i) return; i.type = (i.type==='password'?'text':'password'); }
+
+/* ====== Lógica "Fijar restantes" (no toca tu flujo de guardado) ====== */
+// Calcula límite total como: nuevo_límite = usados + restantesDeseados; luego llama upd(id)
+function setRemaining(id, usedCount){
+  const remInp = document.getElementById('rm'+id);
+  const limInp = document.getElementById('qt'+id);
+  if(!remInp || !limInp) return;
+  const desired = Math.max(0, parseInt(remInp.value || '0', 10));
+  if (!Number.isFinite(desired)) return;
+  const newLimit = (usedCount|0) + desired;
+  limInp.value = String(newLimit);
+  upd(id); // usa tu flujo existente de guardado
+}
+
+// Atajo: Enter en el input "Restantes" dispara Fijar
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target && /^rm\d+$/.test(e.target.id)) {
+    const id = parseInt(e.target.id.replace('rm',''),10);
+    const used = parseInt(e.target.dataset.used || '0', 10) || 0;
+    setRemaining(id, used);
+  }
+});
+
+/* ====== Acciones fila ====== */
+function regen(id){ const inp=document.getElementById('api'+id); if(inp) inp.value=rndKey(40); }
+async function upd(id){
+  const fd=new FormData();
+  fd.append('action','user_update');
+  fd.append('id', id);
+  fd.append('api_key', document.getElementById('api'+id)?.value||'');
+  fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
+  fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
+  fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
+  const r=await fetch('admin.php',{method:'POST',body:fd});
+  alert(await r.text());
+  runSearch(false);
+}
+async function delu(id){
+  if(!confirm('¿Eliminar usuario y sus archivos?')) return;
+  const fd=new FormData(); fd.append('action','user_delete'); fd.append('id',id);
+  const r=await fetch('admin.php',{method:'POST',body:fd});
+  alert(await r.text());
+  runSearch(false);
+}
+
+/* ====== Buscador en tiempo real ====== */
+const qAdmin = document.getElementById('qAdmin');
+const tbody  = document.getElementById('usersTbody');
+const hint   = document.getElementById('usersHint');
+let t=null, ctl=null;
+
+// NOTA: este rowHtml espera que el endpoint devuelva u.used_files (Parte 1/4 lo agrega).
+function rowHtml(u, selfId, rootEmail){
+  const isSelf = (String(u.id)===String(selfId));
+  const isRoot = (rootEmail && u.email===rootEmail);
+  const used = Number(u.used_files||0);
+  const limit = Number(u.quota_limit||0);
+  const remain = Math.max(0, limit - used);
+  return `
+    <tr>
+      <td>${u.id}</td>
+      <td>${esc(u.username||'')}</td>
+      <td>${esc(((u.first_name||'')+' '+(u.last_name||'')).trim())}</td>
+      <td>${esc(u.email||'')}${isSelf? ' <span class="badge">tú</span>' : ''}</td>
+      <td>${u.verified ? '✔️' : '—'}</td>
+      <td><input type="checkbox" id="ad${u.id}" ${u.is_admin?'checked':''} ${(isRoot||isSelf)?'disabled':''}></td>
+      <td><input type="checkbox" id="dx${u.id}" ${u.is_deluxe?'checked':''}></td>
+
+      <!-- Quota + Restantes + Fijar -->
+      <td class="quota-wrap">
+        <div class="quota-row">
+          <input class="input input-narrow" type="number" id="qt${u.id}" value="${limit}" title="Límite total (no restantes)" min="0" step="1" inputmode="numeric">
+          <input class="input input-narrow" type="number" id="rm${u.id}" placeholder="Restantes" title="Fijar restantes y guardar" data-used="${used}" min="0" step="1" inputmode="numeric">
+          <button class="btn" type="button" onclick="setRemaining(${u.id}, ${used})">Fijar</button>
+        </div>
+        <div class="quota-meta">Usados: <b>${used}</b> · Restan: <b>${remain}</b></div>
+      </td>
+
+      <td style="min-width:240px;display:flex;gap:6px;align-items:center">
+        <input class="input" id="api${u.id}" value="${esc(u.api_key||'')}">
+        <button class="btn" type="button" onclick="regen(${u.id})">🔁</button>
+      </td>
+      <td>
+        <div class="actions">
+          <button class="btn" type="button" onclick="upd(${u.id})">Guardar</button>
+          ${(!isRoot && !isSelf) ? `<button class="btn danger" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+async function runSearch(showLoading=true){
+  const q = (qAdmin?.value||'').trim();
+  if (ctl) ctl.abort(); ctl = new AbortController();
+  try{
+    if (showLoading && hint) hint.textContent='Buscando…';
+    const r = await fetch(`admin.php?action=user_list&q=${encodeURIComponent(q)}`, {
+      signal: ctl.signal,
+      cache:'no-store',
+      headers:{'Accept':'application/json'}
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error||'Error en búsqueda');
+    const items = j.items||[];
+    const rootEmail = <?= defined('ROOT_ADMIN_EMAIL') ? json_encode(ROOT_ADMIN_EMAIL) : 'null' ?>;
+    tbody.innerHTML = items.map(u=>rowHtml(u, <?= (int)$uid ?>, rootEmail)).join('');
+    if (hint) hint.textContent = q ? `Resultados: ${items.length}` : 'Se muestran los últimos 50. Escribe para filtrar.';
+  }catch(e){
+    if (e.name !== 'AbortError') {
+      if (hint) hint.textContent='Error al buscar.';
+    }
+  }
+}
+function deb(){ clearTimeout(t); t=setTimeout(()=>runSearch(true), 250); }
+qAdmin?.addEventListener('input', deb);
+runSearch(false);
+</script>
