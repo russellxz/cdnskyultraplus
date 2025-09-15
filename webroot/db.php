@@ -3,6 +3,33 @@
 require_once __DIR__ . '/config.php';
 session_start();
 
+/* === Autoloader de Composer (Stripe SDK, etc.) === */
+$__autoload = __DIR__ . '/vendor/autoload.php';
+if (is_file($__autoload)) {
+  require_once $__autoload;
+}
+
+/* === Helpers globales útiles (no rompen nada) === */
+/** URL base pública (sin slash final). Usa BASE_URL si existe o infiere de la petición. */
+if (!function_exists('app_base_url')) {
+  function app_base_url(): string {
+    if (defined('BASE_URL') && BASE_URL) return rtrim(BASE_URL, '/');
+    $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? null) == 443);
+    $scheme = $https ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
+    $base   = dirname($_SERVER['SCRIPT_NAME'] ?? '/');
+    $base   = rtrim(str_replace('\\', '/', $base), '/');
+    if ($base === '/') $base = '';
+    return $scheme.'://'.$host.$base;
+  }
+}
+/** Devuelve true si el SDK de Stripe está disponible (vía composer). */
+if (!function_exists('stripe_sdk_present')) {
+  function stripe_sdk_present(): bool {
+    return class_exists('\Stripe\StripeClient');
+  }
+}
+
 /* ===========================
  *  Conexión PDO (MySQL/MariaDB)
  * =========================== */
