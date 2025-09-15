@@ -1,79 +1,140 @@
 <?php
+// webroot/stripe_webhook.php
 require_once __DIR__.'/db.php';
-require_once __DIR__.'/../vendor_bootstrap.php';
 
-$whsec = setting_get('stripe_whsec','');
-$sk    = setting_get('stripe_sk','');
-if ($whsec==='' || $sk==='') { http_response_code(500); echo 'Stripe no configurado'; exit; }
+// Composer autoload (vendor está 1 nivel arriba de webroot)
+$autoloads = [__DIR__.'/../vendor/autoload.php', __DIR__.'/vendor/autoload.php'];
+foreach ($autoloads as $p) { if (is_file($p)) { require_once $p; break; } }
 
-$payload = @file_get_contents('php://input');
+use Stripe\Webhook as StripeWebhook;
+use Stripe\StripeClient;
+
+// === util: log a archivo simple para depurar ===
+function slog($msg){
+  $f = __DIR__.'/../stripe_error.log';
+  @file_put_contents($f, '['.date('c')."] ".$msg."\n", FILE_APPEND);
+}
+
+// === lee secret key y whsec desde settings ===
+$sk    = (string) setting_get('stripe_secret','');
+$whsec = (string) setting_get('stripe_webhook_secret','');
+
+// === lee payload + firma ===
+$payload = @file_get_contents('php://input') ?: '';
 $sig     = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
 
-try{
-  $event = \Stripe\Webhook::constructEvent($payload, $sig, $whsec);
-}catch(\UnexpectedValueException $e){
-  http_response_code(400); echo 'payload invalido'; exit;
-}catch(\Stripe\Exception\SignatureVerificationException $e){
-  http_response_code(400); echo 'firma invalida'; exit;
+if ($payload === '') {
+  slog('webhook: payload vacío');
+  http_response_code(400);
+  echo 'no payload';
+  exit;
 }
 
-// Utilidad: aplicar el beneficio del plan
-function apply_plan_effect(PDO $pdo, string $plan, int $user_id): array {
-  switch ($plan) {
-    case 'PLUS50':  $inc=50;  $pdo->prepare("UPDATE users SET quota_limit=quota_limit+? WHERE id=?")->execute([$inc,$user_id]);  return ['inc'=>$inc,'deluxe'=>false];
-    case 'PLUS120': $inc=120; $pdo->prepare("UPDATE users SET quota_limit=quota_limit+? WHERE id=?")->execute([$inc,$user_id]);  return ['inc'=>$inc,'deluxe'=>false];
-    case 'PLUS250': $inc=250; $pdo->prepare("UPDATE users SET quota_limit=quota_limit+? WHERE id=?")->execute([$inc,$user_id]);  return ['inc'=>$inc,'deluxe'=>false];
-    case 'DELUXE':  $pdo->prepare("UPDATE users SET is_deluxe=1 WHERE id=?")->execute([$user_id]);                                return ['inc'=>0,'deluxe'=>true];
-    default: return ['inc'=>0,'deluxe'=>false];
+// === verifica firma si hay whsec ===
+$event = null;
+if ($whsec && class_exists(StripeWebhook::class)) {
+  try {
+    $event = StripeWebhook::constructEvent($payload, $sig, $whsec);
+  } catch (Throwable $e) {
+    slog('webhook: firma inválida: '.$e->getMessage());
+    http_response_code(400);
+    echo 'bad signature';
+    exit;
   }
+} else {
+  // sin firma (no recomendado), parse directo
+  $event = json_decode($payload);
 }
 
-// Para vincular el payment_id a la factura (opcional)
-function payment_id_by_order(string $order_id): ?int {
-  global $pdo;
-  $st=$pdo->prepare("SELECT id FROM payments WHERE order_id=? LIMIT 1");
-  $st->execute([$order_id]);
-  $id = $st->fetchColumn();
-  return $id===false ? null : (int)$id;
+// === manejamos solo checkout.session.completed ===
+$type = $event->type ?? ($event->type ?? null);
+if ($type !== 'checkout.session.completed') {
+  http_response_code(200);
+  echo 'ignored';
+  exit;
 }
 
-if ($event->type === 'checkout.session.completed') {
-  /** @var \Stripe\Checkout\Session $session */
-  $session = $event->data->object;
+$session = $event->data->object ?? null;
+if (!$session) {
+  slog('webhook: sin session en event');
+  http_response_code(400);
+  echo 'no session';
+  exit;
+}
 
-  $user_id   = (int)($session->metadata->user_id ?? 0);
-  $plan_code = (string)($session->metadata->plan_code ?? '');
-  $amount    = isset($session->amount_total) ? ((int)$session->amount_total)/100 : 0;
-  $currency  = strtoupper((string)($session->currency ?? 'USD'));
-  $payer     = (string)($session->customer_details->email ?? '');
+// === datos clave de la sesión ===
+$session_id  = (string)($session->id ?? '');
+$payment_intent_id = (string)($session->payment_intent ?? '');
+$amount_total = floatval(($session->amount_total ?? 0)/100);
+$currency     = strtoupper($session->currency ?? 'USD');
+$plan_code    = strtoupper((string)($session->metadata->plan_code ?? ''));
+$user_id      = (int)($session->metadata->user_id ?? ($session->client_reference_id ?? 0));
+$paid         = ($session->payment_status ?? '') === 'paid';
 
-  if ($user_id>0 && $plan_code!=='') {
-    // 1) Marca/actualiza registro de pago
-    try {
-      payment_upsert($user_id, $session->id, $plan_code, (float)$amount, 'completed', (array)$session);
-    } catch(Throwable $e) {
-      error_log('payment_upsert error: '.$e->getMessage());
-    }
+slog("webhook: session=$session_id plan=$plan_code user=$user_id paid=".($paid?'yes':'no'));
 
-    // 2) Aplica beneficio en la cuenta
-    try {
-      $res = apply_plan_effect($pdo, $plan_code, $user_id);
-    } catch(Throwable $e) {
-      error_log('apply_plan_effect error: '.$e->getMessage());
-    }
+if (!$paid || !$user_id || !$plan_code) {
+  slog('webhook: faltan datos (paid/user_id/plan_code)');
+  http_response_code(200);
+  echo 'noop';
+  exit;
+}
 
-    // 3) (Opcional) Crea factura interna
-    try {
-      $pid = payment_id_by_order($session->id);
-      invoice_create($user_id, $pid, "Stripe $plan_code", (float)$amount, $currency, 'paid', [
-        'payer_email'=>$payer,
-        'event_id'   =>$event->id,
-      ]);
-    } catch(Throwable $e) {
-      error_log('invoice_create error: '.$e->getMessage());
-    }
+// === idempotencia: si ya registramos ese order_id, no repetir ===
+try {
+  $st = $pdo->prepare("SELECT id,status FROM payments WHERE order_id=? LIMIT 1");
+  $st->execute([$session_id]);
+  $row = $st->fetch();
+  if ($row && $row['status']==='completed') {
+    http_response_code(200);
+    echo 'already done';
+    exit;
   }
-}
+} catch(Throwable $e){ /* continua */ }
 
-http_response_code(200);
-echo 'ok';
+// === aplicar el plan (crédito) dentro de transacción ===
+$pdo->beginTransaction();
+try {
+  // Upsert del pago (guardamos provider en el raw_json)
+  payment_upsert(
+    $user_id,
+    $session_id,
+    $plan_code,
+    $amount_total,
+    'completed',
+    ['provider'=>'stripe','session_id'=>$session_id,'payment_intent'=>$payment_intent_id,'currency'=>$currency]
+  );
+
+  // Suma de créditos o deluxe
+  $delta = 0;
+  $set_deluxe = false;
+  switch ($plan_code) {
+    case 'PLUS50':  $delta = 50; break;
+    case 'PLUS120': $delta = 120; break;
+    case 'PLUS250': $delta = 250; break;
+    case 'DELUXE':
+    case 'DELUXE_LIFE':
+      $set_deluxe = true; break;
+    default:
+      // Si mandaste otro code, no hacemos nada para no romper
+      slog('webhook: plan desconocido '.$plan_code);
+  }
+
+  if ($delta > 0) {
+    $st = $pdo->prepare("UPDATE users SET quota_limit = quota_limit + ? WHERE id=?");
+    $st->execute([$delta, $user_id]);
+  }
+  if ($set_deluxe) {
+    $st = $pdo->prepare("UPDATE users SET is_deluxe=1 WHERE id=?");
+    $st->execute([$user_id]);
+  }
+
+  $pdo->commit();
+  http_response_code(200);
+  echo 'ok';
+} catch(Throwable $e){
+  $pdo->rollBack();
+  slog('webhook: error al aplicar crédito: '.$e->getMessage());
+  http_response_code(500);
+  echo 'error';
+}
