@@ -345,23 +345,56 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
       <p class="muted">Configura PayPal en <a class="btn btn-sm ghost" href="admin_payments.php">Admin → Pagos</a> para mostrar los botones.</p>
     </div>
   <?php endif; ?>
-<!-- ===== Stripe: pago con tarjeta (botones) ===== -->
+<!-- ====== Pagar con tarjeta (Stripe) - Tarjetas bonitas ====== -->
 <div class="card">
   <h3>Pagar con tarjeta (Stripe)</h3>
 
-  <div style="display:flex; gap:8px; flex-wrap:wrap">
-    <a class="btn" href="stripe_checkout.php?plan=PLUS50">PLUS50 — pagar con tarjeta</a>
-    <a class="btn" href="stripe_checkout.php?plan=PLUS120">PLUS120 — pagar con tarjeta</a>
-    <a class="btn" href="stripe_checkout.php?plan=PLUS250">PLUS250 — pagar con tarjeta</a>
+  <style>
+    .plansGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px}
+    .planCard{background:#0f172a;border:1px solid #334155;border-radius:16px;padding:16px;text-align:center}
+    .planCard .title{font-size:22px;font-weight:800;margin:6px 0}
+    .planCard .price{font-size:22px;font-weight:900;margin:10px 0}
+    .planCard .sub{color:#9fb0c9;font-size:13px;margin-top:6px}
+    .planCard .btn{width:100%;justify-content:center}
+    .planCard.disabled{opacity:.6}
+  </style>
+
+  <?php
+    // Puedes cambiar estos textos/precios sin tocar la lógica.
+    $stripePlans = [
+      ['code'=>'PLUS50',  'title'=>'+50 archivos',  'price'=>'$1.37'],
+      ['code'=>'PLUS120', 'title'=>'+120 archivos', 'price'=>'$2.45'],
+      ['code'=>'PLUS250', 'title'=>'+250 archivos', 'price'=>'$3.55'],
+    ];
+  ?>
+
+  <div class="plansGrid">
+    <?php foreach($stripePlans as $p): ?>
+      <div class="planCard">
+        <div class="title"><?=htmlspecialchars($p['title'])?></div>
+        <div class="price"><?=htmlspecialchars($p['price'])?></div>
+        <a class="btn" href="stripe_checkout.php?plan=<?=urlencode($p['code'])?>">Pagar con tarjeta</a>
+        <div class="sub">Procesado por Stripe</div>
+      </div>
+    <?php endforeach; ?>
 
     <?php if (empty($me['is_deluxe'])): ?>
-      <a class="btn" href="stripe_checkout.php?plan=DELUXE">DELUXE (de por vida) — pagar con tarjeta</a>
+      <div class="planCard">
+        <div class="title">Plan Deluxe</div>
+        <div class="price">$5.00 <span style="font-weight:700;font-size:14px">(pago único)</span></div>
+        <a class="btn" href="stripe_checkout.php?plan=DELUXE">Pagar con tarjeta</a>
+        <div class="sub">Procesado por Stripe</div>
+      </div>
+    <?php else: ?>
+      <div class="planCard disabled">
+        <div class="title">Plan Deluxe</div>
+        <div class="price">$5.00 <span style="font-weight:700;font-size:14px">(pago único)</span></div>
+        <div class="sub" style="margin-top:14px;font-weight:700">Ya eres Deluxe 💎</div>
+      </div>
     <?php endif; ?>
   </div>
-
-  <p class="muted" style="margin-top:6px">Procesado por Stripe.</p>
 </div>
-<!-- ===== /Stripe ===== -->
+<!-- ====== /Stripe ====== -->
 
 </div>
 
