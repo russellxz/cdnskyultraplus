@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/db.php';
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
@@ -32,9 +33,26 @@ try {
 if (!defined('SIZE_LIMIT_FREE_MB'))   define('SIZE_LIMIT_FREE_MB',   5);
 if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200); // Deluxe “pesado”
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
-?>
-<?php
 
+/* Nombre completo para usar en el mensaje de WhatsApp */
+$fullName = trim(($me['first_name']??'').' '.($me['last_name']??''));
+
+/* ===== Datos de soporte (no se muestran números; solo se usan para construir wa.me) ===== */
+$support_contacts = [
+  ['name'=>'Lucas',   'phone'=>'+57 316 1325891', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/e8e11cfcb94bf312.jpg'],
+  ['name'=>'Diego',   'phone'=>'+57 301 7501838', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/2e170b79fef45e4f.png'],
+  ['name'=>'Gata',    'phone'=>'+52 453 128 7294', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/a1e24da6a417214d.png'],
+  ['name'=>'Mario',   'phone'=>'+57 322 6873710', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/91bf48fe92dc45b0.jpeg'],
+  ['name'=>'Russell', 'phone'=>'+1 516-709-6032', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/00ca8c1a45ef1697.jpg'],
+];
+$waContacts = array_map(function($c){
+  return [
+    'name'   => $c['name'],
+    'img'    => $c['img'],
+    'digits' => preg_replace('/\D+/', '', $c['phone']), // solo dígitos para wa.me
+  ];
+}, $support_contacts);
+?>
 <!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel — CDN SkyUltraPlus</title>
@@ -82,8 +100,36 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   .results{display:grid;gap:8px}
   .r{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:8px}
   .r .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ===== Modal WhatsApp ===== */
+  .wa-modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9999}
+  .wa-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+  .wa-sheet{
+    position:relative; z-index:1; width:min(680px,92vw); max-height:82vh; overflow:auto;
+    background:#0f172a; border:1px solid #334155; border-radius:16px; padding:16px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45)
+  }
+  .wa-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .wa-title{font-weight:900}
+  .wa-close{background:transparent;border:1px solid #334155;color:#eaf2ff;border-radius:10px;padding:8px 10px;cursor:pointer}
+  .wa-grid{display:grid;gap:12px;margin-top:8px}
+  @media(min-width:720px){.wa-grid{grid-template-columns:repeat(2,1fr)}}
+  .wa-card{
+    display:flex;gap:12px;align-items:center;
+    background:#0b1324;border:1px solid #2a3650;border-radius:14px;padding:10px
+  }
+  .wa-avatar{
+    width:56px;height:56px;border-radius:50%;object-fit:cover;aspect-ratio:1/1;flex:0 0 56px;
+    border:2px solid rgba(255,255,255,.18);box-shadow:0 8px 24px rgba(0,0,0,.25);display:block
+  }
+  .wa-info{flex:1;min-width:0}
+  .wa-name{font-weight:800}
+  .wa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .wa-actions .btn{padding:7px 12px;border-radius:8px}
 </style>
-</head><body><div class="wrap">
+</head>
+<body>
+<div class="wrap">
 
   <!-- HERO -->
   <div class="hero">
@@ -349,79 +395,98 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   <?php endif; ?>
 
 
-<!-- ====== Pagar con tarjeta (Stripe) — mismas medidas que PayPal ====== -->
-<div class="card" style="margin-top:14px">
-  <h3>Pagar con tarjeta (Stripe)</h3>
+  <!-- ====== Pagar con tarjeta (Stripe) — mismas medidas que PayPal ====== -->
+  <div class="card" style="margin-top:14px">
+    <h3>Pagar con tarjeta (Stripe)</h3>
 
-  <style>
-    /* Solo ajusta la línea de marca Stripe; el ancho/alto de tarjetas
-       lo hereda de .plans .plan (el mismo CSS que usan las de PayPal) */
-    .stripeMark{
-      display:flex;align-items:center;justify-content:center;
-      gap:6px;margin-top:8px;color:#9fb0c9;font-size:13px
-    }
-    .stripeMark img{height:18px;width:auto;display:inline-block;opacity:.95}
-  </style>
+    <style>
+      /* Solo ajusta la línea de marca Stripe; el ancho/alto de tarjetas
+         lo hereda de .plans .plan (el mismo CSS que usan las de PayPal) */
+      .stripeMark{
+        display:flex;align-items:center;justify-content:center;
+        gap:6px;margin-top:8px;color:#9fb0c9;font-size:13px
+      }
+      .stripeMark img{height:18px;width:auto;display:inline-block;opacity:.95}
+    </style>
 
-  <?php
-    // Mismos textos/precios que PayPal
-    $stripePlans = [
-      ['code'=>'PLUS50',  'title'=>'+50 archivos',  'price'=>'$1.37'],
-      ['code'=>'PLUS120', 'title'=>'+120 archivos', 'price'=>'$2.45'],
-      ['code'=>'PLUS250', 'title'=>'+250 archivos', 'price'=>'$3.55'],
-    ];
-    // Logos
-    $logoSky    = 'https://cdn.skyultraplus.com/uploads/u3/2023398962d380d9.png';
-    $logoStripe = 'https://cdn.skyultraplus.com/uploads/u3/9ebb61359445e3db.png';
-  ?>
+    <?php
+      // Mismos textos/precios que PayPal
+      $stripePlans = [
+        ['code'=>'PLUS50',  'title'=>'+50 archivos',  'price'=>'$1.37'],
+        ['code'=>'PLUS120', 'title'=>'+120 archivos', 'price'=>'$2.45'],
+        ['code'=>'PLUS250', 'title'=>'+250 archivos', 'price'=>'$3.55'],
+      ];
+      // Logos
+      $logoSky    = 'https://cdn.skyultraplus.com/uploads/u3/2023398962d380d9.png';
+      $logoStripe = 'https://cdn.skyultraplus.com/uploads/u3/9ebb61359445e3db.png';
+    ?>
 
-  <div class="plans"><!-- misma grilla que PayPal -->
-    <?php foreach($stripePlans as $p): ?>
-      <div class="plan"><!-- misma tarjeta que PayPal -->
-        <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus"><!-- se escala igual que PayPal -->
-        <div class="title"><?=htmlspecialchars($p['title'])?></div>
-        <div class="price"><?=htmlspecialchars($p['price'])?></div>
+    <div class="plans"><!-- misma grilla que PayPal -->
+      <?php foreach($stripePlans as $p): ?>
+        <div class="plan"><!-- misma tarjeta que PayPal -->
+          <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus"><!-- se escala igual que PayPal -->
+          <div class="title"><?=htmlspecialchars($p['title'])?></div>
+          <div class="price"><?=htmlspecialchars($p['price'])?></div>
 
-        <a class="btn" href="stripe_checkout.php?plan=<?=urlencode($p['code'])?>">Pagar con tarjeta</a>
+          <a class="btn" href="stripe_checkout.php?plan=<?=urlencode($p['code'])?>">Pagar con tarjeta</a>
 
-        <div class="stripeMark">
-          <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
-          <span>Procesado por Stripe</span>
+          <div class="stripeMark">
+            <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
+            <span>Procesado por Stripe</span>
+          </div>
         </div>
-      </div>
-    <?php endforeach; ?>
+      <?php endforeach; ?>
 
-    <?php if ((int)($me['is_deluxe'] ?? 0) !== 1): ?>
-      <div class="plan">
-        <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
-        <div class="title">Plan Deluxe</div>
-        <div class="price">$5.00 (pago único)</div>
+      <?php if ((int)($me['is_deluxe'] ?? 0) !== 1): ?>
+        <div class="plan">
+          <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
+          <div class="title">Plan Deluxe</div>
+          <div class="price">$5.00 (pago único)</div>
 
-        <a class="btn" href="stripe_checkout.php?plan=DELUXE">Pagar con tarjeta</a>
+          <a class="btn" href="stripe_checkout.php?plan=DELUXE">Pagar con tarjeta</a>
 
-        <div class="stripeMark">
-          <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
-          <span>Procesado por Stripe</span>
+          <div class="stripeMark">
+            <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
+            <span>Procesado por Stripe</span>
+          </div>
         </div>
-      </div>
-    <?php else: ?>
-      <div class="plan" style="opacity:.6">
-        <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
-        <div class="title">Plan Deluxe</div>
-        <div class="price">$5.00 (pago único)</div>
-        <div class="muted" style="margin-top:10px">Ya eres Deluxe 💎</div>
+      <?php else: ?>
+        <div class="plan" style="opacity:.6">
+          <img src="<?=htmlspecialchars($logoSky)?>" alt="Sky Ultra Plus">
+          <div class="title">Plan Deluxe</div>
+          <div class="price">$5.00 (pago único)</div>
+          <div class="muted" style="margin-top:10px">Ya eres Deluxe 💎</div>
 
-        <div class="stripeMark">
-          <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
-          <span>Procesado por Stripe</span>
+          <div class="stripeMark">
+            <img src="<?=htmlspecialchars($logoStripe)?>" alt="Stripe">
+            <span>Procesado por Stripe</span>
+          </div>
         </div>
-      </div>
-    <?php endif; ?>
+      <?php endif; ?>
+    </div>
   </div>
-</div>
-<!-- ====== /Stripe ====== -->
+  <!-- ====== /Stripe ====== -->
 
-</div>
+  <!-- ====== Soporte por WhatsApp (botón único; sin números visibles) ====== -->
+  <div class="card" style="margin-top:14px">
+    <h3>¿Necesitas ayuda?</h3>
+    <p class="muted" style="margin:6px 0 12px">Escríbenos por WhatsApp.</p>
+    <button class="btn" id="waOpen" type="button">💬 WhatsApp soporte</button>
+  </div>
+
+  <div class="wa-modal" id="waModal" aria-hidden="true" role="dialog" aria-labelledby="waTitle">
+    <div class="wa-backdrop" id="waBackdrop"></div>
+    <div class="wa-sheet">
+      <div class="wa-top">
+        <div class="wa-title" id="waTitle">Elige un agente</div>
+        <button class="wa-close" id="waClose" type="button">✕</button>
+      </div>
+      <div class="wa-grid" id="waGrid"><!-- se rellena por JS --></div>
+    </div>
+  </div>
+  <!-- ====== /Soporte WhatsApp ====== -->
+
+</div> <!-- /.wrap -->
 
 <script>
   // Ver/Ocultar API Key + copiar
@@ -448,7 +513,7 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
 
   let t=null, ctl=null;
   async function runSearch(){
-    const q = qInput.value.trim();
+    const q = qInput?.value?.trim() || '';
     if (ctl) ctl.abort(); ctl = new AbortController();
     try{
       qHint.textContent='Buscando…';
@@ -477,11 +542,49 @@ $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_
   qInput?.addEventListener('input', deb);
   qBtn?.addEventListener('click', runSearch);
 
-  qRes.addEventListener('click', async (e)=>{
+  qRes?.addEventListener('click', async (e)=>{
     const b=e.target.closest('button[data-url]'); if(!b) return;
     try{ await navigator.clipboard.writeText(b.dataset.url);
       const old=b.textContent; b.textContent='¡Copiado!'; setTimeout(()=>b.textContent=old,1200);
     }catch{ alert('No se pudo copiar automáticamente.\n'+b.dataset.url); }
   });
+
+  // ---------- WhatsApp soporte (modal) ----------
+  (function(){
+    const contacts = <?= json_encode($waContacts, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE) ?>;
+    const msg = <?= json_encode('Hola, necesito soporte de SkyUltraPlus CDN' . ($fullName!=='' ? ' ('.$fullName.')' : '')) ?>;
+
+    const modal   = document.getElementById('waModal');
+    const grid    = document.getElementById('waGrid');
+    const openBtn = document.getElementById('waOpen');
+    const closeBtn= document.getElementById('waClose');
+    const back    = document.getElementById('waBackdrop');
+
+    function esc(s){return (''+s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+    function waLink(digits){ return `https://wa.me/${digits}?text=`+encodeURIComponent(msg); }
+
+    function render(){
+      if (!grid) return;
+      grid.innerHTML = contacts.map(c => `
+        <div class="wa-card">
+          <img class="wa-avatar" src="${esc(c.img)}" alt="${esc(c.name)}" width="56" height="56" loading="lazy">
+          <div class="wa-info">
+            <div class="wa-name">${esc(c.name)}</div>
+            <div class="wa-actions">
+              <a class="btn" href="${waLink(c.digits)}" target="_blank" rel="noopener">💬 Chatear</a>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function open(){ if(modal){ modal.style.display='flex'; modal.setAttribute('aria-hidden','false'); } }
+    function close(){ if(modal){ modal.style.display='none'; modal.setAttribute('aria-hidden','true'); } }
+
+    openBtn?.addEventListener('click', ()=>{ if(!grid.innerHTML) render(); open(); });
+    closeBtn?.addEventListener('click', close);
+    back?.addEventListener('click', close);
+    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && modal?.getAttribute('aria-hidden')==='false') close(); });
+  })();
 </script>
 </body></html>
