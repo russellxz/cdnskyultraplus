@@ -337,7 +337,7 @@ $smtp  = smtp_get();
     <p>Configura tus credenciales, datos de facturación y prueba la conexión con PayPal.</p>
     <a class="btn" href="admin_payments.php">Abrir configuración</a>
   </div>
-
+<a class="btn" href="admin_stripe.php">💳 Configurar Stripe</a>
   <div class="card">
     <h3>SMTP</h3>
     <form onsubmit="saveSMTP(event)">
