@@ -34,26 +34,6 @@ if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200); // De
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 ?>
 <?php
-// === Soporte por WhatsApp ===
-$support_contacts = [
-  ['name'=>'Lucas',   'phone'=>'+57 316 1325891', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/e8e11cfcb94bf312.jpg'],
-  ['name'=>'Diego',   'phone'=>'+57 301 7501838', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/2e170b79fef45e4f.png'],
-  ['name'=>'Gata',    'phone'=>'+52 453 128 7294', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/a1e24da6a417214d.png'],
-  ['name'=>'Mario',   'phone'=>'+57 322 6873710', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/91bf48fe92dc45b0.jpeg'],
-  ['name'=>'Russell', 'phone'=>'+1 516-709-6032', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/00ca8c1a45ef1697.jpg'],
-];
-
-function su_h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
-function su_wa_link(string $rawPhone, string $userFullName=''): string {
-  // quita todo excepto dígitos (wa.me requiere solo números, con código de país)
-  $digits = preg_replace('/\D+/', '', $rawPhone);
-  $msg = 'Hola, necesito soporte de SkyUltraPlus CDN';
-  if ($userFullName !== '') $msg .= ' ('.$userFullName.')';
-  return 'https://wa.me/'.$digits.'?text='.rawurlencode($msg);
-}
-$userFullName = trim(($me['first_name']??'').' '.($me['last_name']??''));
-?>
-
 
 <!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -441,31 +421,6 @@ $userFullName = trim(($me['first_name']??'').' '.($me['last_name']??''));
 </div>
 <!-- ====== /Stripe ====== -->
 
-  <div class="card" style="margin-top:14px">
-  <h3>Soporte por WhatsApp</h3>
-  <p class="muted" style="margin:6px 0 12px">Habla directo con nuestro equipo de soporte.</p>
-
-  <div class="support-grid">
-    <?php foreach ($support_contacts as $c): 
-      $link = su_wa_link($c['phone'], $userFullName);
-    ?>
-      <div class="support-card">
-        <img class="support-avatar" src="<?=su_h($c['img'])?>" alt="<?=su_h($c['name'])?>">
-        <div class="support-info">
-          <div class="support-name"><?=su_h($c['name'])?></div>
-          <div class="support-phone"><?=su_h($c['phone'])?></div>
-          <div class="support-actions">
-            <a class="btn" href="<?=$link?>" target="_blank" rel="noopener">💬 WhatsApp</a>
-            <a class="btn ghost" href="tel:<?=preg_replace('/\D+/', '', $c['phone'])?>">📞 Llamar</a>
-          </div>
-        </div>
-      </div>
-    <?php endforeach; ?>
-  </div>
-</div>
-
-  
-  
 </div>
 
 <script>
