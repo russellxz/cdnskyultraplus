@@ -1,63 +1,68 @@
 <?php
 require_once __DIR__.'/db.php';
-require_once __DIR__.'/../vendor_bootstrap.php';
+require_once __DIR__.'/config.php';
 
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (empty($_SESSION['uid'])) { http_response_code(401); exit('Auth required'); }
+// Debe existir vendor/autoload.php
+$autoload = __DIR__.'/../vendor/autoload.php';
+if (!file_exists($autoload)) $autoload = __DIR__.'/vendor/autoload.php';
+if (!file_exists($autoload)) {
+  http_response_code(500);
+  exit('Falta vendor/autoload.php (composer install).');
+}
+require_once $autoload;
 
-header('Content-Type: application/json; charset=utf-8');
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
+$uid  = (int)$_SESSION['uid'];
+$plan = strtoupper(trim($_GET['plan'] ?? ''));
 
-function json_out($a,$c=200){ http_response_code($c); echo json_encode($a,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }
+// Trae Price IDs desde settings
+$prices = [
+  'PLUS50'  => setting_get('stripe_price_plus50', ''),
+  'PLUS120' => setting_get('stripe_price_plus120', ''),
+  'PLUS250' => setting_get('stripe_price_plus250', ''),
+  'DELUXE'  => setting_get('stripe_price_deluxe', ''),
+];
 
-// -------- Validación de configuración --------
-$sk = setting_get('stripe_sk','');
-$pk = setting_get('stripe_pk','');
-if ($sk==='' || !class_exists(\Stripe\StripeClient::class)) {
-  json_out(['ok'=>false,'error'=>'Stripe no está configurado o SDK ausente'], 500);
+function show_err($msg, $code=400){
+  http_response_code($code);
+  echo "<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;background:#0b0b0d;color:#eaf2ff'><div style='max-width:720px;margin:40px auto;background:#111827;border:1px solid #334155;border-radius:12px;padding:18px'><h2>Error</h2><p>$msg</p><p><a href='profile.php' style='color:#93c5fd'>Volver</a></p></div></body>";
+  exit;
 }
 
-// -------- Usuario actual --------
-$uid = (int)$_SESSION['uid'];
-$st  = $pdo->prepare("SELECT id,email FROM users WHERE id=? LIMIT 1");
-$st->execute([$uid]); $me = $st->fetch();
-if (!$me) json_out(['ok'=>false,'error'=>'Usuario inválido'], 400);
+if (!isset($prices[$plan])) show_err('Plan inválido.');
+$priceId = $prices[$plan];
 
-// -------- Entrada --------
-$plan = strtoupper(trim($_POST['plan'] ?? ($_GET['plan'] ?? '')));
-$ALLOWED = ['PLUS50','PLUS120','PLUS250','DELUXE'];
-if (!in_array($plan,$ALLOWED,true)) json_out(['ok'=>false,'error'=>'Plan inválido'], 400);
+if (!$priceId) show_err('No hay Price ID configurado para este plan. Ve a Configurar Stripe.');
+if (stripos($priceId, 'prod_') === 0) {
+  show_err('Pusiste un Product ID (prod_…). Stripe Checkout necesita un Price ID (price_…). Corrígelo en Configurar Stripe.');
+}
 
-// Price ID desde settings (definidos en admin_stripe.php)
-$price = setting_get('stripe_price_'.$plan, '');
-if ($price==='') json_out(['ok'=>false,'error'=>'Falta Price ID del plan en configuración'], 400);
-
-// -------- URLs de retorno --------
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS']!=='off') ? 'https' : 'http';
-$host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$base   = $scheme.'://'.$host;
-
-$success = $base.'/stripe_success.php?session_id={CHECKOUT_SESSION_ID}';
-$cancel  = $base.'/profile.php#pay';
-
-// -------- Crear sesión --------
-$stripe  = new \Stripe\StripeClient($sk);
+$secret = setting_get('stripe_secret', '');
+if (!$secret) show_err('No hay Secret Key configurada en Stripe.');
 
 try{
+  $stripe = new \Stripe\StripeClient($secret);
+
   $session = $stripe->checkout->sessions->create([
     'mode' => 'payment',
-    'payment_method_types' => ['card'],
-    'line_items' => [[ 'price' => $price, 'quantity' => 1 ]],
-    'success_url' => $success,
-    'cancel_url'  => $cancel,
-    'customer_email' => $me['email'] ?? null,
-    'client_reference_id' => (string)$uid,
-    'metadata' => [
+    'line_items' => [[
+      'price'    => $priceId,
+      'quantity' => 1,
+    ]],
+    'success_url' => rtrim(BASE_URL,'/').'/stripe_success.php?session_id={CHECKOUT_SESSION_ID}',
+    'cancel_url'  => rtrim(BASE_URL,'/').'/profile.php',
+    'metadata'    => [
       'user_id'   => (string)$uid,
       'plan_code' => $plan,
     ],
   ]);
-  json_out(['ok'=>true,'url'=>$session->url]);
-}catch(Throwable $e){
-  error_log('stripe_checkout create error: '.$e->getMessage());
-  json_out(['ok'=>false,'error'=>'No se pudo crear el checkout'], 500);
+
+  header('Location: '.$session->url, true, 303);
+  exit;
+
+} catch (\Stripe\Exception\ApiErrorException $e) {
+  show_err('Stripe API error: '.htmlspecialchars($e->getMessage()), 502);
+} catch (Throwable $e) {
+  show_err('Error inesperado: '.htmlspecialchars($e->getMessage()), 500);
 }
