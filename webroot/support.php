@@ -1,8 +1,5 @@
 <?php
-// Página pública: no requiere sesión.
-// Si quieres el mismo header de seguridad que en otras páginas, puedes incluir db.php.
-// require_once __DIR__.'/db.php';
-
+// Página pública (no requiere sesión)
 function h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
 function digits($p){ return preg_replace('/\D+/', '', $p); }
 function wa_link($phone, $msg='Hola, necesito soporte de SkyUltraPlus'){
@@ -62,7 +59,6 @@ $email_support = 'soporte@skyultraplus.com';
   }
   .support-info{min-width:0;flex:1}
   .support-name{font-weight:800}
-  .support-phone{color:var(--muted);font-size:13px;margin-top:2px}
   .support-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
   .top-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 </style>
@@ -71,7 +67,7 @@ $email_support = 'soporte@skyultraplus.com';
 <div class="wrap">
   <div class="card">
     <h1>Soporte de SkyUltraPlus</h1>
-    <p class="muted">Elige un agente o escríbenos por correo.</p>
+    <p class="muted">Elige un agente para hablar por WhatsApp o escríbenos por correo.</p>
     <div class="top-actions">
       <a class="btn" href="mailto:<?=h($email_support)?>">✉️ <?=h($email_support)?></a>
       <a class="btn ghost" href="index.php">← Volver al inicio</a>
@@ -83,10 +79,8 @@ $email_support = 'soporte@skyultraplus.com';
           <img class="support-avatar" src="<?=h($c['img'])?>" alt="<?=h($c['name'])?>" width="56" height="56" loading="lazy">
           <div class="support-info">
             <div class="support-name"><?=h($c['name'])?></div>
-            <div class="support-phone"><?=h($c['phone'])?></div>
             <div class="support-actions">
               <a class="btn" href="<?=h(wa_link($c['phone']))?>" target="_blank" rel="noopener">💬 WhatsApp</a>
-              <a class="btn ghost" href="tel:<?=h(digits($c['phone']))?>">📞 Llamar</a>
             </div>
           </div>
         </div>
