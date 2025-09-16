@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__.'/db.php';
 require_once __DIR__.'/config.php';
+
 header('Content-Type: application/json; charset=utf-8');
 
 function jsonOut(array $p, int $status = 200){
@@ -9,66 +10,77 @@ function jsonOut(array $p, int $status = 200){
   exit;
 }
 
-/* --- BASE_URL fallback por si no está definida en config.php --- */
+/* BASE_URL (fallback) */
 if (!defined('BASE_URL')) {
   $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
   $host   = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
   define('BASE_URL', $scheme.'://'.$host);
 }
 
-/* --- Sesión / usuario --- */
-if (empty($_SESSION['uid'])) jsonOut(['ok'=>false,'error'=>'No autenticado'], 401);
-$uid = (int)$_SESSION['uid'];
+/* ===== Autenticación: API key (si viene) o sesión ===== */
+$api = $_SERVER['HTTP_X_API_KEY']
+    ?? ($_SERVER['HTTP_X_APIKEY'] ?? null)
+    ?? ($_POST['api_key'] ?? '');
+$api = trim((string)$api);
 
-$st = $pdo->prepare("SELECT is_deluxe, verified, email, quota_limit FROM users WHERE id=?");
-$st->execute([$uid]);
-$me = $st->fetch();
-if (!$me)                       jsonOut(['ok'=>false,'error'=>'Usuario no encontrado'], 404);
-if ((int)$me['verified'] !== 1) jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+if ($api !== '') {
+  $st = $pdo->prepare("SELECT id, verified, is_deluxe, quota_limit FROM users WHERE api_key=? LIMIT 1");
+  $st->execute([$api]);
+  $me = $st->fetch();
+  if (!$me)                       jsonOut(['ok'=>false,'error'=>'API key inválida'], 401);
+  if ((int)$me['verified'] !== 1) jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+  $uid = (int)$me['id'];
+} else {
+  if (session_status() === PHP_SESSION_NONE) session_start();
+  if (empty($_SESSION['uid'])) jsonOut(['ok'=>false,'error'=>'No autenticado'], 401);
+  $uid = (int)$_SESSION['uid'];
+  $st  = $pdo->prepare("SELECT is_deluxe, verified, email, quota_limit FROM users WHERE id=?");
+  $st->execute([$uid]);
+  $me = $st->fetch();
+  if (!$me)                       jsonOut(['ok'=>false,'error'=>'Usuario no encontrado'], 404);
+  if ((int)$me['verified'] !== 1) jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
+}
 
-/* --- Nombre “humano” --- */
+/* Helper: limpiar etiqueta corta */
 if (!function_exists('clean_label')) {
   function clean_label(string $s): string {
     $s = trim(preg_replace('/\s+/', ' ', $s));
     return function_exists('mb_substr') ? mb_substr($s, 0, 120) : substr($s, 0, 120);
   }
 }
-$name = clean_label($_POST['name'] ?? '');
-if ($name === '') jsonOut(['ok'=>false,'error'=>'Debes poner un nombre al archivo']);
 
-/* --- Archivo presente --- */
+/* Archivo presente */
 if (!isset($_FILES['file']) || !is_array($_FILES['file'])) jsonOut(['ok'=>false,'error'=>'Archivo faltante']);
 $err = (int)($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
 switch ($err) {
   case UPLOAD_ERR_OK: break;
   case UPLOAD_ERR_INI_SIZE:
-  case UPLOAD_ERR_FORM_SIZE:
-    jsonOut(['ok'=>false,'error'=>'El archivo supera el límite de PHP ('.ini_get('upload_max_filesize').').']);
-  case UPLOAD_ERR_PARTIAL: jsonOut(['ok'=>false,'error'=>'Subida incompleta. Intenta de nuevo.']);
-  case UPLOAD_ERR_NO_FILE: jsonOut(['ok'=>false,'error'=>'No se envió ningún archivo.']);
-  default: jsonOut(['ok'=>false,'error'=>'Error de PHP al subir (código '.$err.').']);
+  case UPLOAD_ERR_FORM_SIZE: jsonOut(['ok'=>false,'error'=>'El archivo supera el límite de PHP ('.ini_get('upload_max_filesize').').']);
+  case UPLOAD_ERR_PARTIAL:   jsonOut(['ok'=>false,'error'=>'Subida incompleta. Intenta de nuevo.']);
+  case UPLOAD_ERR_NO_FILE:   jsonOut(['ok'=>false,'error'=>'No se envió ningún archivo.']);
+  default:                   jsonOut(['ok'=>false,'error'=>'Error de PHP al subir (código '.$err.').']);
 }
 if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
   jsonOut(['ok'=>false,'error'=>'Archivo no válido']);
 }
 
-/* --- Límite por plan --- */
+/* Límite por plan */
 if (!defined('SIZE_LIMIT_FREE_MB'))   define('SIZE_LIMIT_FREE_MB',   5);
 if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200);
 $maxMB = ((int)$me['is_deluxe'] === 1) ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
 
 $sizeBytes = (int)($_FILES['file']['size'] ?? 0);
-if ($sizeBytes <= 0)                           jsonOut(['ok'=>false,'error'=>'Archivo vacío o inválido']);
-if ($sizeBytes > $maxMB * 1024 * 1024)         jsonOut(['ok'=>false,'error'=>"Tu archivo excede el límite de {$maxMB}MB"]);
+if ($sizeBytes <= 0)                   jsonOut(['ok'=>false,'error'=>'Archivo vacío o inválido']);
+if ($sizeBytes > $maxMB*1024*1024)    jsonOut(['ok'=>false,'error'=>"Tu archivo excede el límite de {$maxMB}MB"]);
 
-/* --- Cuota por cantidad --- */
+/* Cuota por cantidad */
 $st = $pdo->prepare("SELECT COUNT(*) FROM files WHERE user_id=?");
 $st->execute([$uid]);
 $usados = (int)$st->fetchColumn();
 $limite = (int)$me['quota_limit'];
-if ($usados >= $limite)                        jsonOut(['ok'=>false,'error'=>'Sin espacio disponible.']);
+if ($usados >= $limite)               jsonOut(['ok'=>false,'error'=>'Sin espacio disponible.']);
 
-/* --- Directorio destino --- */
+/* Directorio destino */
 if (!defined('UPLOAD_BASE')) define('UPLOAD_BASE', __DIR__.'/uploads');
 $dir = rtrim(UPLOAD_BASE,'/')."/u$uid";
 if (!is_dir($dir)) @mkdir($dir, 0775, true);
@@ -76,12 +88,20 @@ if (!is_dir($dir) || !is_writable($dir)) {
   jsonOut(['ok'=>false,'error'=>'No se pudo escribir en uploads. Revisa permisos (chown www-data:www-data y chmod 775).'], 500);
 }
 
-/* --- Nombre físico único --- */
+/* Nombre original + extensión */
 $orig = $_FILES['file']['name'] ?? '';
 $ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
 $ext  = preg_replace('/[^a-z0-9_\-]/i', '', $ext);
 $ext  = $ext !== '' ? ('.'.$ext) : '';
 
+/* ===== name: usar POST[name] o derivarlo del nombre de archivo ===== */
+$name = clean_label($_POST['name'] ?? '');
+if ($name === '') {
+  $base = trim(preg_replace('/\.[^.]+$/', '', (string)$orig));
+  $name = clean_label($base !== '' ? $base : ('archivo '.date('Y-m-d H:i')));
+}
+
+/* Nombre físico único */
 $tries = 8;
 do {
   $fname = bin2hex(random_bytes(8)).$ext;
@@ -94,13 +114,13 @@ if (!move_uploaded_file($_FILES['file']['tmp_name'], $path)) {
 }
 @chmod($path, 0644);
 
-/* --- MIME + nombre original --- */
+/* MIME + nombre original */
 $finfo = @finfo_open(FILEINFO_MIME_TYPE);
 $mime  = $finfo ? (finfo_file($finfo, $path) ?: 'application/octet-stream') : 'application/octet-stream';
 if ($finfo) @finfo_close($finfo);
 $origName = $orig !== '' ? $orig : $fname;
 
-/* --- Aviso no bloqueante para formatos poco “web-friendly” --- */
+/* Aviso formatos poco web-friendly */
 $browserFriendly = [
   'image/jpeg','image/png','image/webp','image/gif',
   'audio/mpeg','audio/aac','audio/ogg',
@@ -108,7 +128,7 @@ $browserFriendly = [
 ];
 $warn = in_array($mime, $browserFriendly, true) ? null : 'Formato no estándar para navegador (se subió igual).';
 
-/* --- Guardar en BD (detectando columnas extra en MariaDB) --- */
+/* Guardar en BD (mime/orig_name si existen) */
 try {
   $q = $pdo->prepare(
     "SELECT COUNT(DISTINCT COLUMN_NAME)
@@ -121,12 +141,10 @@ try {
   $haveBoth = ((int)$q->fetchColumn() === 2);
 
   if ($haveBoth) {
-    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name)
-            VALUES(?,?,?,?,?,?,?)";
+    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name) VALUES(?,?,?,?,?,?,?)";
     $params = [$uid,$name,$url,$path,$sizeBytes,$mime,$origName];
   } else {
-    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes)
-            VALUES(?,?,?,?,?)";
+    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes) VALUES(?,?,?,?,?)";
     $params = [$uid,$name,$url,$path,$sizeBytes];
   }
   $pdo->prepare($sql)->execute($params);
@@ -135,14 +153,14 @@ try {
   @unlink($path);
   $msg = $e->getMessage();
   if (stripos($msg,'Unknown column') !== false) {
-    $hint = "Esquema desactualizado: faltan columnas en `files`. Ejecuta:\n".
+    $hint = "Esquema desactualizado: faltan columnas en `files`.\n".
             "ALTER TABLE files ADD COLUMN mime VARCHAR(100) NULL, ADD COLUMN orig_name VARCHAR(191) NULL;";
     jsonOut(['ok'=>false,'error'=>'Error al guardar en BD.','hint'=>$hint], 500);
   }
   jsonOut(['ok'=>false,'error'=>'Error al guardar en la base de datos'], 500);
 }
 
-/* --- OK --- */
+/* OK */
 $out = ['ok'=>true,'file'=>['name'=>$name,'url'=>$url,'mime'=>$mime,'orig'=>$origName]];
 if ($warn) $out['warn'] = $warn;
 jsonOut($out);
