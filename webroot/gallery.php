@@ -11,7 +11,17 @@ function bytes_fmt($b){
   while($b>=1024 && $i<count($u)-1){ $b/=1024; $i++; }
   return ($b>=10?round($b):round($b,1)).' '.$u[$i];
 }
-function fmt_date($ts){ return date('d/m/Y H:i', strtotime($ts ?: 'now')); }
+function fmt_date($ts){ if(!$ts) return ''; $t=strtotime($ts); return $t?date('d/m/Y H:i',$t):''; }
+
+/* --- build image WHERE (sin usar mime) --- */
+$IMG_WHERE = "
+  (
+    LOWER(url)  LIKE '%.png%'  OR LOWER(url)  LIKE '%.jpg%'  OR LOWER(url)  LIKE '%.jpeg%'
+ OR LOWER(url)  LIKE '%.gif%'  OR LOWER(url)  LIKE '%.webp%' OR LOWER(url)  LIKE '%.svg%'
+ OR LOWER(name) LIKE '%.png%'  OR LOWER(name) LIKE '%.jpg%'  OR LOWER(name) LIKE '%.jpeg%'
+ OR LOWER(name) LIKE '%.gif%'  OR LOWER(name) LIKE '%.webp%' OR LOWER(name) LIKE '%.svg%'
+  )
+";
 
 /* --- endpoint AJAX: /gallery.php?ajax=1&q=... --- */
 if (isset($_GET['ajax'])) {
@@ -20,34 +30,34 @@ if (isset($_GET['ajax'])) {
   $q = trim((string)($_GET['q'] ?? ''));
   try{
     if ($q !== '') {
-      $needle = strtolower($q);
-      $sql = "SELECT id,name,url,size,mime,created_at
+      $needle = '%'.strtolower($q).'%';
+      $sql = "SELECT id,name,url,size,created_at,created
               FROM files
-              WHERE user_id=?
-                AND (mime LIKE 'image/%' OR LOWER(url) REGEXP '\\\\.(png|jpe?g|gif|webp|svg)$')
-                AND (INSTR(LOWER(name), ?) > 0 OR INSTR(LOWER(url), ?) > 0)
+              WHERE user_id=? AND $IMG_WHERE
+                AND (LOWER(name) LIKE ? OR LOWER(url) LIKE ?)
               ORDER BY id DESC
               LIMIT 500";
       $st = $pdo->prepare($sql);
       $st->execute([$uid, $needle, $needle]);
     } else {
-      $st = $pdo->prepare("SELECT id,name,url,size,mime,created_at
-                           FROM files
-                           WHERE user_id=? AND (mime LIKE 'image/%' OR LOWER(url) REGEXP '\\\\.(png|jpe?g|gif|webp|svg)$')
-                           ORDER BY id DESC
-                           LIMIT 120");
+      $sql = "SELECT id,name,url,size,created_at,created
+              FROM files
+              WHERE user_id=? AND $IMG_WHERE
+              ORDER BY id DESC
+              LIMIT 120";
+      $st = $pdo->prepare($sql);
       $st->execute([$uid]);
     }
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $items = array_map(function($r){
       return [
-        'id' => (int)$r['id'],
-        'name' => (string)($r['name'] ?? ''),
-        'url' => (string)($r['url'] ?? ''),
-        'size_fmt' => bytes_fmt((int)($r['size'] ?? 0)),
-        'created_fmt' => fmt_date($r['created_at'] ?? 'now'),
+        'id'          => (int)$r['id'],
+        'name'        => (string)($r['name'] ?? ''),
+        'url'         => (string)($r['url'] ?? ''),
+        'size_fmt'    => bytes_fmt((int)($r['size'] ?? 0)),
+        'created_fmt' => fmt_date($r['created_at'] ?? $r['created'] ?? null),
       ];
-    }, $rows ?: []);
+    }, $rows);
     echo json_encode(['ok'=>true,'items'=>$items], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
   }catch(Throwable $e){
     echo json_encode(['ok'=>false,'error'=>'Error al buscar'], JSON_UNESCAPED_UNICODE);
@@ -57,9 +67,9 @@ if (isset($_GET['ajax'])) {
 
 /* --- SSR inicial (muestra algo sin JS) --- */
 try{
-  $st=$pdo->prepare("SELECT id,name,url,size,mime,created_at
+  $st=$pdo->prepare("SELECT id,name,url,size,created_at,created
                      FROM files
-                     WHERE user_id=? AND (mime LIKE 'image/%' OR LOWER(url) REGEXP '\\\\.(png|jpe?g|gif|webp|svg)$')
+                     WHERE user_id=? AND $IMG_WHERE
                      ORDER BY id DESC
                      LIMIT 60");
   $st->execute([$uid]);
@@ -72,7 +82,7 @@ try{
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mi galería — SkyUltraPlus</title>
 <style>
-  :root{ --txt:#eaf2ff; --muted:#9fb0c9; --stroke:#334155; --card:#0f172a; --g1:#0ea5e9; --g2:#22d3ee; }
+  :root{ --txt:#eaf2ff; --muted:#9fb0c9; --stroke:#334155; --g1:#0ea5e9; --g2:#22d3ee; }
   *{box-sizing:border-box}
   body{
     margin:0;font:15px/1.6 system-ui;color:var(--txt);
@@ -97,15 +107,9 @@ try{
   @media(min-width:1320px){ .grid{grid-template-columns:repeat(4,1fr)} }
 
   .card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px}
-  .tile{
-    position:relative;overflow:hidden;border-radius:12px;border:1px solid #26324a;background:#0b1324
-  }
-  .thumb{
-    width:100%; height:220px; object-fit:cover; display:block; background:#0d1830;
-  }
-  .meta{
-    display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px
-  }
+  .tile{position:relative;overflow:hidden;border-radius:12px;border:1px solid #26324a;background:#0b1324}
+  .thumb{width:100%; height:220px; object-fit:cover; display:block; background:#0d1830;}
+  .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
   .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .small{font-size:12px;color:var(--muted)}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
@@ -132,7 +136,9 @@ try{
   <p class="muted" id="hint" style="margin-top:6px">Se muestran hasta 120 resultados.</p>
 
   <div id="grid" class="grid">
-    <?php foreach ($initial as $it): ?>
+    <?php if (!$initial): ?>
+      <p class="muted">Sin imágenes aún.</p>
+    <?php else: foreach ($initial as $it): ?>
       <div class="card">
         <div class="tile">
           <img class="thumb" src="<?=h($it['url'])?>" alt="<?=h($it['name'])?>" loading="lazy">
@@ -141,13 +147,13 @@ try{
           <div class="name" title="<?=h($it['name'])?>"><?=h($it['name'])?></div>
           <div class="small"><?=h(bytes_fmt($it['size'] ?? 0))?></div>
         </div>
-        <div class="small"><?=h(fmt_date($it['created_at'] ?? 'now'))?></div>
+        <div class="small"><?=h(fmt_date($it['created_at'] ?? $it['created'] ?? null))?></div>
         <div class="actions">
           <a class="btn" href="<?=h($it['url'])?>" target="_blank" rel="noopener">Abrir</a>
           <button class="btn ghost" type="button" data-url="<?=h($it['url'])?>">Copiar URL</button>
         </div>
       </div>
-    <?php endforeach; ?>
+    <?php endforeach; endif; ?>
   </div>
 </div>
 
