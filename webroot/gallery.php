@@ -4,77 +4,18 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
-/* helpers */
 function h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
-function bytes_fmt($b){
-  $u=['B','KB','MB','GB']; $i=0; $b=(float)$b;
-  while($b>=1024 && $i<count($u)-1){ $b/=1024; $i++; }
-  return ($b>=10?round($b):round($b,1)).' '.$u[$i];
+function ext_from($s){
+  $e = strtolower(pathinfo((string)$s, PATHINFO_EXTENSION));
+  return $e ?: '';
 }
-function fmt_date($ts){ if(!$ts) return ''; $t=strtotime($ts); return $t?date('d/m/Y H:i',$t):''; }
-
-/* --- build image WHERE (sin usar mime) --- */
-$IMG_WHERE = "
-  (
-    LOWER(url)  LIKE '%.png%'  OR LOWER(url)  LIKE '%.jpg%'  OR LOWER(url)  LIKE '%.jpeg%'
- OR LOWER(url)  LIKE '%.gif%'  OR LOWER(url)  LIKE '%.webp%' OR LOWER(url)  LIKE '%.svg%'
- OR LOWER(name) LIKE '%.png%'  OR LOWER(name) LIKE '%.jpg%'  OR LOWER(name) LIKE '%.jpeg%'
- OR LOWER(name) LIKE '%.gif%'  OR LOWER(name) LIKE '%.webp%' OR LOWER(name) LIKE '%.svg%'
-  )
-";
-
-/* --- endpoint AJAX: /gallery.php?ajax=1&q=... --- */
-if (isset($_GET['ajax'])) {
-  header('Content-Type: application/json; charset=utf-8');
-  header('Cache-Control: no-store');
-  $q = trim((string)($_GET['q'] ?? ''));
-  try{
-    if ($q !== '') {
-      $needle = '%'.strtolower($q).'%';
-      $sql = "SELECT id,name,url,size,created_at,created
-              FROM files
-              WHERE user_id=? AND $IMG_WHERE
-                AND (LOWER(name) LIKE ? OR LOWER(url) LIKE ?)
-              ORDER BY id DESC
-              LIMIT 500";
-      $st = $pdo->prepare($sql);
-      $st->execute([$uid, $needle, $needle]);
-    } else {
-      $sql = "SELECT id,name,url,size,created_at,created
-              FROM files
-              WHERE user_id=? AND $IMG_WHERE
-              ORDER BY id DESC
-              LIMIT 120";
-      $st = $pdo->prepare($sql);
-      $st->execute([$uid]);
-    }
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    $items = array_map(function($r){
-      return [
-        'id'          => (int)$r['id'],
-        'name'        => (string)($r['name'] ?? ''),
-        'url'         => (string)($r['url'] ?? ''),
-        'size_fmt'    => bytes_fmt((int)($r['size'] ?? 0)),
-        'created_fmt' => fmt_date($r['created_at'] ?? $r['created'] ?? null),
-      ];
-    }, $rows);
-    echo json_encode(['ok'=>true,'items'=>$items], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-  }catch(Throwable $e){
-    echo json_encode(['ok'=>false,'error'=>'Error al buscar'], JSON_UNESCAPED_UNICODE);
-  }
-  exit;
+function infer_type($name,$url){
+  $t = strtolower($name.' '.$url);
+  foreach (['.png','.jpg','.jpeg','.webp','.gif','.svg'] as $e) if (strpos($t,$e)!==false) return 'image';
+  foreach (['.mp4','.webm','.mov','.m4v'] as $e) if (strpos($t,$e)!==false) return 'video';
+  foreach (['.mp3','.aac','.ogg','.wav'] as $e) if (strpos($t,$e)!==false) return 'audio';
+  return 'other';
 }
-
-/* --- SSR inicial (muestra algo sin JS) --- */
-try{
-  $st=$pdo->prepare("SELECT id,name,url,size,created_at,created
-                     FROM files
-                     WHERE user_id=? AND $IMG_WHERE
-                     ORDER BY id DESC
-                     LIMIT 60");
-  $st->execute([$uid]);
-  $initial = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
-}catch(Throwable $e){ $initial=[]; }
 ?>
 <!doctype html>
 <html lang="es">
@@ -85,7 +26,8 @@ try{
   :root{ --txt:#eaf2ff; --muted:#9fb0c9; --stroke:#334155; --g1:#0ea5e9; --g2:#22d3ee; }
   *{box-sizing:border-box}
   body{
-    margin:0;font:15px/1.6 system-ui;color:var(--txt);
+    margin:0;font:15px/1.6 system-ui,color:var(--txt);
+    color:var(--txt);
     background:
       radial-gradient(800px 500px at 100% -10%, rgba(219,39,119,.25), transparent 60%),
       radial-gradient(800px 500px at 0% 110%, rgba(37,99,235,.25), transparent 60%),
@@ -109,6 +51,10 @@ try{
   .card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px}
   .tile{position:relative;overflow:hidden;border-radius:12px;border:1px solid #26324a;background:#0b1324}
   .thumb{width:100%; height:220px; object-fit:cover; display:block; background:#0d1830;}
+  .thumb-audio, .thumb-file{
+    display:flex;align-items:center;justify-content:center;
+    font-size:42px;height:220px; text-transform:uppercase; letter-spacing:.5px; color:#c6d4ff;
+  }
   .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
   .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .small{font-size:12px;color:var(--muted)}
@@ -121,11 +67,11 @@ try{
   <div class="topbar">
     <div>
       <h1>Mi galería</h1>
-      <div class="muted">Vista de todas tus <b>imágenes</b> subidas.</div>
+      <div class="muted">Usa la misma búsqueda de <b>Mis archivos</b>. Verás imágenes, videos, audio y más.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <a class="btn" href="profile.php">⬅️ Volver</a>
-      <a class="btn ghost" href="list.php">📁 Ver lista completa</a>
+      <a class="btn ghost" href="list.php">📁 Ver lista</a>
     </div>
   </div>
 
@@ -133,31 +79,13 @@ try{
     <input id="q" class="input" placeholder="Buscar por nombre o parte de la URL…" autocomplete="off">
     <button class="btn" id="qBtn" type="button">Buscar</button>
   </div>
-  <p class="muted" id="hint" style="margin-top:6px">Se muestran hasta 120 resultados.</p>
+  <p class="muted" id="hint" style="margin-top:6px">Se muestran los últimos 20 o los 20 que coincidan con tu búsqueda.</p>
 
-  <div id="grid" class="grid">
-    <?php if (!$initial): ?>
-      <p class="muted">Sin imágenes aún.</p>
-    <?php else: foreach ($initial as $it): ?>
-      <div class="card">
-        <div class="tile">
-          <img class="thumb" src="<?=h($it['url'])?>" alt="<?=h($it['name'])?>" loading="lazy">
-        </div>
-        <div class="meta">
-          <div class="name" title="<?=h($it['name'])?>"><?=h($it['name'])?></div>
-          <div class="small"><?=h(bytes_fmt($it['size'] ?? 0))?></div>
-        </div>
-        <div class="small"><?=h(fmt_date($it['created_at'] ?? $it['created'] ?? null))?></div>
-        <div class="actions">
-          <a class="btn" href="<?=h($it['url'])?>" target="_blank" rel="noopener">Abrir</a>
-          <button class="btn ghost" type="button" data-url="<?=h($it['url'])?>">Copiar URL</button>
-        </div>
-      </div>
-    <?php endforeach; endif; ?>
-  </div>
+  <div id="grid" class="grid"><p class="muted">Cargando…</p></div>
 </div>
 
 <script>
+  const ENDPOINT = 'list.php?ajax=1'; // usa EXACTAMENTE el mismo endpoint de búsqueda
   const grid = document.getElementById('grid');
   const hint = document.getElementById('hint');
   const q    = document.getElementById('q');
@@ -165,19 +93,42 @@ try{
   let ctl=null, t=null;
 
   function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function inferType(name,url){
+    const t = (name+' '+url).toLowerCase();
+    const has = (arr)=>arr.some(e=>t.includes(e));
+    if (has(['.png','.jpg','.jpeg','.webp','.gif','.svg'])) return 'image';
+    if (has(['.mp4','.webm','.mov','.m4v'])) return 'video';
+    if (has(['.mp3','.aac','.ogg','.wav'])) return 'audio';
+    return 'other';
+  }
+  function extFrom(s){
+    const m = /\.([a-z0-9]{1,8})(?:\?|#|$)/i.exec(s||'');
+    return (m?m[1]:'').toLowerCase();
+  }
   function cardHtml(it){
+    const type = inferType(it.name||'', it.url||'');
+    const ext  = extFrom(it.url||'') || extFrom(it.name||'') || 'file';
+    let media = '';
+    if (type==='image'){
+      media = `<img class="thumb" src="${esc(it.url)}" alt="${esc(it.name)}" loading="lazy">`;
+    } else if (type==='video'){
+      media = `<video class="thumb" src="${esc(it.url)}" preload="metadata" playsinline muted controls></video>`;
+    } else if (type==='audio'){
+      media = `<div class="thumb thumb-audio">🎵</div>`;
+    } else {
+      media = `<div class="thumb thumb-file">${esc(ext)}</div>`;
+    }
     return `
       <div class="card">
-        <div class="tile">
-          <img class="thumb" src="${esc(it.url)}" alt="${esc(it.name)}" loading="lazy">
-        </div>
+        <div class="tile">${media}</div>
         <div class="meta">
           <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
-          <div class="small">${esc(it.size_fmt)}</div>
+          <div class="small">${esc(it.size_fmt||'')}</div>
         </div>
-        <div class="small">${esc(it.created_fmt)}</div>
+        <div class="small">${esc(it.created_fmt||'')}</div>
         <div class="actions">
           <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">Abrir</a>
+          ${type==='audio' ? `<audio src="${esc(it.url)}" controls style="width:100%;margin-top:6px"></audio>` : ''}
           <button class="btn ghost" type="button" data-url="${esc(it.url)}">Copiar URL</button>
         </div>
       </div>`;
@@ -188,25 +139,28 @@ try{
     if (ctl) ctl.abort(); ctl = new AbortController();
     hint.textContent='Buscando…';
     try{
-      const r = await fetch('gallery.php?ajax=1&q='+encodeURIComponent(s), {signal: ctl.signal});
+      const url = ENDPOINT + (s?('&q='+encodeURIComponent(s)):'');
+      const r = await fetch(url, {signal: ctl.signal});
+      if (!r.ok){ grid.innerHTML='<p class="muted">Error del servidor.</p>'; hint.textContent='Intenta de nuevo.'; return; }
       const j = await r.json();
       const items = j.items||[];
       grid.innerHTML = items.length ? items.map(cardHtml).join('') : '<p class="muted">Sin resultados.</p>';
-      hint.textContent = s ? `Resultados para “${s}” · ${items.length}` : 'Se muestran hasta 120 resultados.';
+      hint.textContent = s ? `Resultados para “${s}” · ${items.length}` : 'Se muestran los últimos 20 archivos.';
     }catch(e){
       if (e.name!=='AbortError'){ grid.innerHTML='<p class="muted">Error al buscar.</p>'; hint.textContent='Intenta de nuevo.'; }
     }
   }
-  function deb(){ clearTimeout(t); t=setTimeout(runSearch, 280); }
+  function deb(){ clearTimeout(t); t=setTimeout(runSearch, 250); }
   q.addEventListener('input', deb);
   qBtn.addEventListener('click', runSearch);
 
   grid.addEventListener('click', async (e)=>{
     const b=e.target.closest('button[data-url]'); if(!b) return;
-    try{ await navigator.clipboard.writeText(b.dataset.url);
-      const old=b.textContent; b.textContent='¡Copiada!'; setTimeout(()=>b.textContent=old,1200);
-    }catch{ alert('No se pudo copiar automáticamente.\n'+b.dataset.url); }
+    try{ await navigator.clipboard.writeText(b.dataset.url||''); const old=b.textContent; b.textContent='¡Copiada!'; setTimeout(()=>b.textContent=old,1200); }catch{}
   });
+
+  // Carga inicial: mismos “últimos 20” que list.php cuando q=''
+  runSearch();
 </script>
 </body>
 </html>
