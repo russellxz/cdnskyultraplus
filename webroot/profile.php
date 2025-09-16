@@ -41,8 +41,8 @@ $fullName = trim(($me['first_name']??'').' '.($me['last_name']??''));
 $support_contacts = [
   ['name'=>'Lucas',   'phone'=>'+57 316 1325891', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/e8e11cfcb94bf312.jpg'],
   ['name'=>'Diego',   'phone'=>'+57 301 7501838', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/2e170b79fef45e4f.png'],
-  ['name'=>'Gata',    'phone'=>'+52 453 128 7294', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/a1e24da6a417214d.png'],
-  ['name'=>'Mario',   'phone'=>'+57 322 6873710', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/91bf48fe92dc45b0.jpeg'],
+  ['name'=>'GataDios',    'phone'=>'+52 453 128 7294', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/a1e24da6a417214d.png'],
+  ['name'=>'elrebelde21',   'phone'=>'+57 322 6873710', 'img'=>'https://cdn.skyultraplus.com/uploads/u4/455037009be8550b.jpg'],
   ['name'=>'Russell', 'phone'=>'+1 516-709-6032', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/00ca8c1a45ef1697.jpg'],
 ];
 function su_h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
@@ -138,8 +138,8 @@ function su_digits($p){ return preg_replace('/\D+/', '', $p); }
 
   <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px">
     <a class="btn" href="gallery.php">🖼️ Ir a mi galería</a>
-    <a class="btn" href="list.php">📁 Ver todos mis archivos</a>
-    <a class="btn" href="settings.php">👤 Perfil / Configuración</a>
+    <a class="btn" href="list">📁 Ver todos mis archivos</a>
+    <a class="btn" href="settings">👤 Perfil / Configuración</a>
     <a class="btn" href="docs">📖 Docs API</a>
     <?php if(!empty($me['is_admin'])): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
   </p>

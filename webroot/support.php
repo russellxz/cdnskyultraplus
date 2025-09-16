@@ -10,7 +10,7 @@ $contacts = [
   ['name'=>'Lucas',   'phone'=>'+57 316 1325891',  'img'=>'https://cdn.skyultraplus.com/uploads/u3/e8e11cfcb94bf312.jpg'],
   ['name'=>'Diego',   'phone'=>'+57 301 7501838',  'img'=>'https://cdn.skyultraplus.com/uploads/u3/2e170b79fef45e4f.png'],
   ['name'=>'GataDios',    'phone'=>'+52 453 128 7294', 'img'=>'https://cdn.skyultraplus.com/uploads/u3/a1e24da6a417214d.png'],
-  ['name'=>'elrebelde21',   'phone'=>'+57 322 6873710',  'img'=>'https://cdn.skyultraplus.com/uploads/u3/91bf48fe92dc45b0.jpeg'],
+  ['name'=>'elrebelde21',   'phone'=>'+57 322 6873710',  'img'=>'https://cdn.skyultraplus.com/uploads/u4/455037009be8550b.jpg'],
   ['name'=>'Russell', 'phone'=>'+1 516-709-6032',  'img'=>'https://cdn.skyultraplus.com/uploads/u3/00ca8c1a45ef1697.jpg'],
 ];
 
