@@ -4,73 +4,118 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SkyUltraPlus CDN — API Docs</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <style>
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #f8f9fa;
-      color: #222;
-      line-height: 1.6;
+      font-family: "Inter", sans-serif;
+      background: #f9fafb;
+      color: #1f2937;
       margin: 0;
       padding: 0;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      background: #4f46e5;
+      color: #fff;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+    }
+    nav h1 {
+      margin: 0;
+      font-size: 1.25rem;
+    }
+    nav a {
+      color: #fff;
+      text-decoration: none;
+      margin-left: 1.5rem;
+      font-weight: 500;
     }
     header {
       background: linear-gradient(90deg, #4f46e5, #9333ea);
       color: white;
-      padding: 2rem;
+      padding: 4rem 2rem;
       text-align: center;
     }
-    header h1 {
-      margin: 0;
+    header h2 {
       font-size: 2rem;
+      margin-bottom: .5rem;
     }
     main {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 2rem auto;
       padding: 0 1rem;
     }
     section {
-      margin-bottom: 2.5rem;
+      background: white;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
-    h2 {
+    h3 {
       color: #4f46e5;
-      margin-bottom: .5rem;
+      margin-bottom: 1rem;
     }
     pre {
-      background: #1e1e1e;
-      color: #f8f8f2;
       padding: 1rem;
       border-radius: 8px;
       overflow-x: auto;
       font-size: 0.9rem;
     }
     code {
-      background: #eee;
-      padding: 2px 4px;
-      border-radius: 4px;
+      font-family: monospace;
     }
     footer {
       text-align: center;
       padding: 2rem;
-      background: #f1f1f1;
+      background: #f3f4f6;
       margin-top: 2rem;
       font-size: 0.9rem;
-      color: #555;
+      color: #6b7280;
+    }
+    .support-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #4f46e5;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 50px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .support-btn:hover {
+      background: #3730a3;
     }
   </style>
 </head>
 <body>
+  <nav>
+    <h1>🚀 SkyUltraPlus CDN</h1>
+    <div>
+      <a href="profile.php">Perfil</a>
+      <a href="gallery.php">Galería</a>
+      <a href="docs.html">Docs</a>
+    </div>
+  </nav>
+
   <header>
-    <h1>🚀 SkyUltraPlus CDN — API Docs</h1>
+    <h2>📖 API Docs</h2>
     <p>Sube y comparte imágenes, videos, audios y archivos con tu propia API Key</p>
   </header>
 
   <main>
     <section>
-      <h2>🔑 Autenticación</h2>
-      <p>
-        Todas las solicitudes requieren un header con tu API Key:
-      </p>
-      <pre><code>X-API-KEY: tu_api_key</code></pre>
+      <h3>🔑 Autenticación</h3>
+      <p>Todas las solicitudes requieren un header con tu API Key:</p>
+      <pre><code class="language-bash">X-API-KEY: tu_api_key</code></pre>
       <p>
         • <strong>Free</strong>: límite <code>5 MB</code> por archivo.<br>
         • <strong>Deluxe</strong>: límite <code>100 MB</code>, API Key personalizada y soporte prioritario.
@@ -78,9 +123,9 @@
     </section>
 
     <section>
-      <h2>📤 Subir archivo</h2>
+      <h3>📤 Subir archivo</h3>
       <p><strong>Endpoint</strong></p>
-      <pre><code>POST https://cdn.skyultraplus.com/upload.php</code></pre>
+      <pre><code class="language-http">POST https://cdn.skyultraplus.com/upload.php</code></pre>
 
       <p><strong>Parámetros (multipart/form-data)</strong></p>
       <ul>
@@ -90,13 +135,13 @@
       </ul>
 
       <p><strong>Ejemplo con curl</strong></p>
-      <pre><code>curl -H "X-API-KEY: TU_API_KEY" \
+      <pre><code class="language-bash">curl -H "X-API-KEY: TU_API_KEY" \
 -F "name=prueba" \
 -F "file=@/ruta/imagen.jpg" \
 https://cdn.skyultraplus.com/upload.php</code></pre>
 
       <p><strong>Respuesta exitosa</strong></p>
-      <pre><code>{
+      <pre><code class="language-json">{
   "ok": true,
   "file": {
     "id": 123,
@@ -109,7 +154,7 @@ https://cdn.skyultraplus.com/upload.php</code></pre>
     </section>
 
     <section>
-      <h2>⚠️ Errores comunes</h2>
+      <h3>⚠️ Errores comunes</h3>
       <ul>
         <li><code>401 Unauthorized</code>: API Key inválida o no verificada.</li>
         <li><code>413 Payload Too Large</code>: el archivo supera el límite de tu plan.</li>
@@ -118,8 +163,8 @@ https://cdn.skyultraplus.com/upload.php</code></pre>
     </section>
 
     <section>
-      <h2>🤖 Ejemplo en Node.js</h2>
-      <pre><code>import fetch from "node-fetch";
+      <h3>🤖 Ejemplo en Node.js</h3>
+      <pre><code class="language-javascript">import fetch from "node-fetch";
 import FormData from "form-data";
 import fs from "fs";
 
@@ -138,8 +183,13 @@ console.log(json);</code></pre>
     </section>
   </main>
 
+  <a class="support-btn" href="support.php">💬 Soporte</a>
+
   <footer>
     💎 SkyUltraPlus CDN — Todos los derechos reservados © 2025
   </footer>
+
+  <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>
