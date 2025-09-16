@@ -63,14 +63,6 @@ if (!function_exists('clean_label')) {
   }
 }
 
-$origFilename = $_FILES['file']['name'] ?? '';  // lo usaremos como fallback de name
-$name = clean_label($_POST['name'] ?? '');
-if ($name === '') {
-  $base = pathinfo($origFilename, PATHINFO_FILENAME);
-  if ($base === '' || $base === null) $base = 'archivo_'.date('Ymd_His');
-  $name = clean_label($base);
-}
-
 if (!isset($_FILES['file']) || !is_array($_FILES['file'])) jsonOut(['ok'=>false,'error'=>'Archivo faltante']);
 $err = (int)($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
 switch ($err) {
@@ -84,6 +76,15 @@ switch ($err) {
 }
 if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
   jsonOut(['ok'=>false,'error'=>'Archivo no válido']);
+}
+
+$origFilename = $_FILES['file']['name'] ?? '';
+$name = clean_label($_POST['name'] ?? '');
+// Si no mandan "name", lo inferimos del nombre original (sin extensión)
+if ($name === '') {
+  $base = pathinfo($origFilename, PATHINFO_FILENAME);
+  if ($base === '' || $base === null) $base = 'archivo_'.date('Ymd_His');
+  $name = clean_label($base);
 }
 
 /* ========= 3) Límites ========= */
@@ -110,11 +111,31 @@ if (!is_dir($dir) || !is_writable($dir)) {
   jsonOut(['ok'=>false,'error'=>'No se pudo escribir en uploads. Revisa permisos (chown www-data:www-data y chmod 775).'], 500);
 }
 
-/* nombre físico único */
-$ext  = strtolower(pathinfo($origFilename, PATHINFO_EXTENSION));
-$ext  = preg_replace('/[^a-z0-9_\-]/i', '', $ext);
-$ext  = $ext !== '' ? ('.'.$ext) : '';
+/* ========= 4.1) Determinar extensión (robusto) ========= */
+// 1) Lo que venga del nombre original…
+$ext = strtolower(pathinfo($origFilename, PATHINFO_EXTENSION));
+$ext = preg_replace('/[^a-z0-9_\-]/i', '', $ext);
 
+// 2) Si NO hay extensión, inferir desde el MIME del tmp_name (antes de mover)
+$tmp = $_FILES['file']['tmp_name'] ?? '';
+$finfo = @finfo_open(FILEINFO_MIME_TYPE);
+$mimeTmp = ($finfo && $tmp) ? (finfo_file($finfo, $tmp) ?: '') : '';
+if ($finfo) @finfo_close($finfo);
+
+if ($ext === '' && $mimeTmp) {
+  $map = [
+    'image/jpeg'=>'jpg', 'image/jpg'=>'jpg', 'image/png'=>'png', 'image/webp'=>'webp', 'image/gif'=>'gif',
+    'video/mp4'=>'mp4', 'video/webm'=>'webm', 'video/quicktime'=>'mov',
+    'audio/mpeg'=>'mp3', 'audio/aac'=>'aac', 'audio/ogg'=>'ogg', 'audio/wav'=>'wav',
+    'application/pdf'=>'pdf', 'application/zip'=>'zip', 'application/x-zip-compressed'=>'zip',
+    'application/vnd.android.package-archive'=>'apk',
+  ];
+  if (!empty($map[$mimeTmp])) $ext = $map[$mimeTmp];
+}
+// 3) Si aún no hay, último recurso
+$ext = $ext !== '' ? ('.'.$ext) : '';
+
+/* nombre físico único */
 $tries = 8;
 do {
   $fname = bin2hex(random_bytes(8)).$ext;
