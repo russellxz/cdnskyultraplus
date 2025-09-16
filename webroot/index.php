@@ -51,6 +51,7 @@ function flash_html(string $s): string {
     color:#051425;border:none;border-radius:10px;
     padding:10px 14px;font-weight:800;text-decoration:none;cursor:pointer
   }
+  .btn.ghost{background:transparent;border:1px solid #334155;color:#eaf2ff}
   .input{
     width:100%;padding:10px;border-radius:10px;
     border:1px solid #334155;background:#0f172a;color:#eaf2ff
@@ -72,12 +73,17 @@ function flash_html(string $s): string {
     border-radius:12px;padding:12px 14px;
     border:1px solid; line-height:1.4
   }
-  .ok{
-    background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.5); color:#c8ffd7
+  .ok{ background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.5); color:#c8ffd7 }
+  .err{ background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.5); color:#ffd3d3 }
+
+  /* --- bloque soporte debajo del “crear cuenta / olvidé” --- */
+  .support-cta{
+    margin-top:12px;padding:12px;border-radius:12px;
+    background:rgba(15,23,42,.6);border:1px solid #2b3956
   }
-  .err{
-    background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.5); color:#ffd3d3
-  }
+  .support-cta p{margin:0 0 8px}
+  .support-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .support-actions .btn{border-radius:9px}
 </style>
 </head>
 <body>
@@ -107,6 +113,18 @@ function flash_html(string $s): string {
       ¿No tienes cuenta? <a href="register.php">Crea tu cuenta</a> ·
       <a href="forgot.php">Olvidé mi contraseña</a>
     </p>
+
+    <!-- BLOQUE DE SOPORTE (debajo del texto anterior) -->
+    <div class="support-cta">
+      <p class="muted">
+        ¿No puedes registrarte, no te llega el correo de verificación o tienes otro problema?
+      </p>
+      <div class="support-actions">
+        <a class="btn" href="support.php">💬 Hablar con soporte</a>
+        <a class="btn ghost" href="mailto:soporte@skyultraplus.com">✉️ Enviar correo</a>
+      </div>
+    </div>
+    <!-- /SOPORTE -->
   </div>
 
 </div>
