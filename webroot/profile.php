@@ -105,44 +105,44 @@ function su_digits($p){ return preg_replace('/\D+/', '', $p); }
     <img class="logo" src="https://cdn.russellxz.click/47d048e3.png" alt="Sky Ultra Plus">
     <h1>Bienvenido a SkyUltraPlus CDN</h1>
   </div>
-
   <!-- ESTADO -->
-  <div class="card">
-    <div class="topline">
-      <div>
-        <div>Hola, <b><?=su_h(trim(($me['first_name']??'').' '.($me['last_name']??'')))?></b></div>
-        <div style="margin-top:6px">
-          Estado: <?= ((int)$me['is_deluxe']===1)?'💎 <b>Deluxe</b>':'Estándar' ?> <?= !empty($me['is_admin'])?'<span class="bad">Admin</span>':'' ?>
-        </div>
+<div class="card">
+  <div class="topline">
+    <div>
+      <div>Hola, <b><?=su_h(trim(($me['first_name']??'').' '.($me['last_name']??'')))?></b></div>
+      <div style="margin-top:6px">
+        Estado: <?= ((int)$me['is_deluxe']===1)?'💎 <b>Deluxe</b>':'Estándar' ?> <?= !empty($me['is_admin'])?'<span class="bad">Admin</span>':'' ?>
       </div>
-      <div><a href="logout.php">Salir</a></div>
     </div>
-
-    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:center">
-      <span class="pill">
-        API Key:
-        <code id="apikey" data-full="<?=su_h($me['api_key'])?>" data-show="0">••••••••••••••••••••••••</code>
-      </span>
-      <button class="pill grad" id="toggleKey" type="button">Ver</button>
-      <button class="pill grad" id="copyKey" type="button">Copiar API Key</button>
-      <span class="pill grad">Disponibles: <b><?=$remain?></b></span>
-      <span class="pill">Límite por archivo: <b><?=$maxMB?>MB</b></span>
-    </div>
-
-    <?php if((int)$me['is_deluxe']!==1): ?>
-      <p class="muted" style="margin:10px 0 0">
-        Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo <b>(pago único $5)</b>.
-      </p>
-    <?php else: ?>
-      <p class="muted" style="margin:10px 0 0">Tu plan <b>Deluxe</b> está activo. Disfruta subidas de hasta <b><?=SIZE_LIMIT_DELUXE_MB?>MB</b> por archivo.</p>
-    <?php endif; ?>
-
-    <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px">
-      <a class="btn" href="list.php">📁 Ver todos mis archivos</a>
-      <a class="btn" href="settings.php">👤 Perfil / Configuración</a>
-      <?php if(!empty($me['is_admin'])): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
-    </p>
+    <div><a href="logout.php">Salir</a></div>
   </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:center">
+    <span class="pill">
+      API Key:
+      <code id="apikey" data-full="<?=su_h($me['api_key'])?>" data-show="0">••••••••••••••••••••••••</code>
+    </span>
+    <button class="pill grad" id="toggleKey" type="button">Ver</button>
+    <button class="pill grad" id="copyKey" type="button">Copiar API Key</button>
+    <span class="pill grad">Disponibles: <b><?=$remain?></b></span>
+    <span class="pill">Límite por archivo: <b><?=$maxMB?>MB</b></span>
+  </div>
+
+  <?php if((int)$me['is_deluxe']!==1): ?>
+    <p class="muted" style="margin:10px 0 0">
+      Cuentas normales: máximo <?=SIZE_LIMIT_FREE_MB?>MB por archivo. Con <b>Deluxe</b> subes hasta <?=SIZE_LIMIT_DELUXE_MB?>MB por archivo <b>(pago único $5)</b>.
+    </p>
+  <?php else: ?>
+    <p class="muted" style="margin:10px 0 0">Tu plan <b>Deluxe</b> está activo. Disfruta subidas de hasta <b><?=SIZE_LIMIT_DELUXE_MB?>MB</b> por archivo.</p>
+  <?php endif; ?>
+
+  <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px">
+    <a class="btn" href="gallery.php">🖼️ Ir a mi galería</a>
+    <a class="btn" href="list.php">📁 Ver todos mis archivos</a>
+    <a class="btn" href="settings.php">👤 Perfil / Configuración</a>
+    <?php if(!empty($me['is_admin'])): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
+  </p>
+</div>
 
   <!-- SUBIR -->
   <div class="row row2" style="margin-top:14px">
