@@ -1,196 +1,246 @@
 <?php
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../config.php';
+require_once __DIR__.'/db.php';
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
+$uid=(int)$_SESSION['uid'];
 
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Api-Key, X-APIKEY');
+/* --- helpers --- */
+function h($s){ return htmlspecialchars($s??'', ENT_QUOTES, 'UTF-8'); }
+function bytes_fmt($b){ $u=['B','KB','MB','GB']; $i=0; $b=(float)$b; while($b>=1024&&$i<3){$b/=1024;$i++;} return ($b>=10?round($b):round($b,1)).' '.$u[$i]; }
+function fmt_date($ts){ if(!$ts) return ''; $t=strtotime($ts); return $t?date('d/m/Y H:i',$t):''; }
+function has_col(PDO $pdo,string $table,string $col): bool{
+  $q=$pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?");
+  $q->execute([$table,$col]); return (int)$q->fetchColumn()===1;
+}
+function infer_type(?string $mime, string $url, string $orig=''): string {
+  $m=strtolower((string)$mime);
+  if ($m){
+    if (strpos($m,'image/')===0) return 'image';
+    if (strpos($m,'video/')===0) return 'video';
+    if (strpos($m,'audio/')===0) return 'audio';
+  }
+  $s=strtolower($url.' '.$orig);
+  foreach (['.png','.jpg','.jpeg','.webp','.gif','.svg'] as $e) if (strpos($s,$e)!==false) return 'image';
+  foreach (['.mp4','.webm','.mov','.m4v'] as $e) if (strpos($s,$e)!==false) return 'video';
+  foreach (['.mp3','.aac','.ogg','.wav'] as $e) if (strpos($s,$e)!==false) return 'audio';
+  return 'other';
+}
 
-function jsonOut(array $p, int $status = 200){
-  http_response_code($status);
-  echo json_encode($p, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
+/* --- columnas opcionales --- */
+$haveMime      = has_col($pdo,'files','mime');
+$haveOrigName  = has_col($pdo,'files','orig_name');
+
+/* --- AJAX: /gallery.php?ajax=1&q=... --- */
+if (isset($_GET['ajax'])) {
+  header('Content-Type: application/json; charset=utf-8');
+  header('Cache-Control: no-store');
+  $q = trim((string)($_GET['q'] ?? ''));
+  try{
+    $cols = "id,name,url,size_bytes,created_at".($haveMime?",mime":"").($haveOrigName?",orig_name":"");
+    if ($q !== '') {
+      $needle = '%'.strtolower($q).'%';
+      $st = $pdo->prepare("SELECT $cols FROM files
+                           WHERE user_id=? AND (LOWER(name) LIKE ? OR LOWER(url) LIKE ?)
+                           ORDER BY id DESC LIMIT 300");
+      $st->execute([$uid,$needle,$needle]);
+    } else {
+      $st = $pdo->prepare("SELECT $cols FROM files
+                           WHERE user_id=? ORDER BY id DESC LIMIT 150");
+      $st->execute([$uid]);
+    }
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $items = array_map(function($r) use($haveMime,$haveOrigName){
+      $mime = $haveMime ? ($r['mime'] ?? '') : '';
+      $orig = $haveOrigName ? ($r['orig_name'] ?? '') : '';
+      return [
+        'id'          => (int)$r['id'],
+        'name'        => (string)($r['name'] ?? ''),
+        'url'         => (string)($r['url'] ?? ''),
+        'size_fmt'    => bytes_fmt((int)($r['size_bytes'] ?? 0)),
+        'created_fmt' => fmt_date($r['created_at'] ?? null),
+        'type'        => infer_type($mime, (string)($r['url'] ?? ''), (string)$orig),
+        'ext'         => strtolower(pathinfo((string)($r['url'] ?? $orig), PATHINFO_EXTENSION))
+      ];
+    }, $rows);
+    echo json_encode(['ok'=>true,'items'=>$items], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+  }catch(Throwable $e){
+    echo json_encode(['ok'=>false,'error'=>'Error al buscar'], JSON_UNESCAPED_UNICODE);
+  }
   exit;
 }
 
-/* ----- CORS preflight ----- */
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-  http_response_code(204);
-  exit;
+/* --- SSR inicial --- */
+try{
+  $cols = "id,name,url,size_bytes,created_at".($haveMime?",mime":"").($haveOrigName?",orig_name":"");
+  $st=$pdo->prepare("SELECT $cols FROM files WHERE user_id=? ORDER BY id DESC LIMIT 60");
+  $st->execute([$uid]);
+  $initial = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}catch(Throwable $e){ $initial=[]; }
+
+function card_from_row(array $r, bool $haveMime, bool $haveOrigName){
+  $mime = $haveMime ? ($r['mime'] ?? '') : '';
+  $orig = $haveOrigName ? ($r['orig_name'] ?? '') : '';
+  $type = infer_type($mime, (string)($r['url'] ?? ''), (string)$orig);
+  $ext  = strtolower(pathinfo((string)($r['url'] ?? $orig), PATHINFO_EXTENSION));
+  $name = (string)($r['name'] ?? '');
+  $url  = (string)($r['url'] ?? '');
+  $size = bytes_fmt((int)($r['size_bytes'] ?? 0));
+  $date = fmt_date($r['created_at'] ?? null);
+
+  ob_start(); ?>
+  <div class="card">
+    <div class="tile">
+      <?php if ($type==='image'): ?>
+        <img class="thumb" src="<?=h($url)?>" alt="<?=h($name)?>" loading="lazy">
+      <?php elseif ($type==='video'): ?>
+        <video class="thumb" src="<?=h($url)?>" preload="metadata" playsinline muted controls></video>
+      <?php elseif ($type==='audio'): ?>
+        <div class="thumb thumb-audio">🎵</div>
+      <?php else: ?>
+        <div class="thumb thumb-file"><?= h($ext ?: 'file') ?></div>
+      <?php endif; ?>
+    </div>
+    <div class="meta">
+      <div class="name" title="<?=h($name)?>"><?=h($name)?></div>
+      <div class="small"><?=h($size)?></div>
+    </div>
+    <div class="small"><?=h($date)?></div>
+    <div class="actions">
+      <a class="btn" href="<?=h($url)?>" target="_blank" rel="noopener">Abrir</a>
+      <button class="btn ghost" type="button" data-url="<?=h($url)?>">Copiar URL</button>
+    </div>
+  </div>
+  <?php return ob_get_clean();
 }
-
-/* ----- Sólo POST real ----- */
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-  jsonOut(['ok'=>false,'error'=>'Método no permitido'], 405);
-}
-
-/* ----- Fallback de BASE_URL si no viene en config.php ----- */
-if (!defined('BASE_URL')) {
-  $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-  $host   = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
-  define('BASE_URL', $scheme.'://'.$host);
-}
-
-/* ===========================
- * 1) Autenticación por API key
- * =========================== */
-$api = $_SERVER['HTTP_X_API_KEY']
-    ?? ($_SERVER['HTTP_X_APIKEY'] ?? null)
-    ?? ($_POST['api_key'] ?? '');
-$api = trim((string)$api);
-
-if ($api === '') {
-  jsonOut(['ok'=>false,'error'=>'Falta API key (usa header X-API-Key o campo api_key)'], 401);
-}
-
-$st = $pdo->prepare("SELECT id, verified, is_deluxe, quota_limit FROM users WHERE api_key=? LIMIT 1");
-$st->execute([$api]);
-$u = $st->fetch();
-if (!$u)                       jsonOut(['ok'=>false,'error'=>'API key inválida'], 401);
-if ((int)$u['verified'] !== 1) jsonOut(['ok'=>false,'error'=>'Cuenta no verificada'], 403);
-
-$uid      = (int)$u['id'];
-$isDeluxe = (int)$u['is_deluxe'] === 1;
-$quotaMax = (int)$u['quota_limit'];
-
-/* ===========================
- * 2) Validación de entrada
- * =========================== */
-if (!function_exists('clean_label')) {
-  function clean_label(string $s): string {
-    $s = trim(preg_replace('/\s+/', ' ', $s));
-    return function_exists('mb_substr') ? mb_substr($s, 0, 120) : substr($s, 0, 120);
+?>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mi galería — SkyUltraPlus</title>
+<style>
+  :root{ --txt:#eaf2ff; --muted:#9fb0c9; --stroke:#334155; --g1:#0ea5e9; --g2:#22d3ee; }
+  *{box-sizing:border-box}
+  body{
+    margin:0;font:15px/1.6 system-ui;color:var(--txt);
+    background:
+      radial-gradient(800px 500px at 100% -10%, rgba(219,39,119,.25), transparent 60%),
+      radial-gradient(800px 500px at 0% 110%, rgba(37,99,235,.25), transparent 60%),
+      linear-gradient(160deg,#0a0b12 10%, #120e1a 40%, #051436 100%);
   }
-}
-$name = clean_label($_POST['name'] ?? '');
-if ($name === '') jsonOut(['ok'=>false,'error'=>'Debes poner un nombre al archivo']);
+  a{color:#93c5fd;text-decoration:none}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(90deg,var(--g1),var(--g2));color:#051425;border:none;border-radius:10px;padding:9px 14px;font-weight:800;text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--stroke)}
+  .input{width:100%;padding:10px;border-radius:10px;border:1px solid var(--stroke);background:#0f172a;color:var(--txt)}
+  .muted{color:var(--muted)}
+  h1{margin:6px 0 10px;font-size:26px;line-height:1.2}
 
-if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
-  jsonOut(['ok'=>false,'error'=>'Archivo faltante']);
-}
-$err = (int)($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
-switch ($err) {
-  case UPLOAD_ERR_OK: break;
-  case UPLOAD_ERR_INI_SIZE:
-  case UPLOAD_ERR_FORM_SIZE:
-    jsonOut(['ok'=>false,'error'=>'El archivo supera el límite de PHP ('.ini_get('upload_max_filesize').').']);
-  case UPLOAD_ERR_PARTIAL:
-    jsonOut(['ok'=>false,'error'=>'Subida incompleta. Intenta de nuevo.']);
-  case UPLOAD_ERR_NO_FILE:
-    jsonOut(['ok'=>false,'error'=>'No se envió ningún archivo.']);
-  default:
-    jsonOut(['ok'=>false,'error'=>'Error de PHP al subir (código '.$err.').']);
-}
-if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
-  jsonOut(['ok'=>false,'error'=>'Archivo no válido']);
-}
+  .search{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:10px}
+  .grid{display:grid;gap:12px;margin-top:14px}
+  @media(min-width:700px){ .grid{grid-template-columns:repeat(2,1fr)} }
+  @media(min-width:1020px){ .grid{grid-template-columns:repeat(3,1fr)} }
+  @media(min-width:1320px){ .grid{grid-template-columns:repeat(4,1fr)} }
 
-/* ===========================
- * 3) Límites (plan + cuota)
- * =========================== */
-if (!defined('SIZE_LIMIT_FREE_MB'))   define('SIZE_LIMIT_FREE_MB',   5);
-if (!defined('SIZE_LIMIT_DELUXE_MB')) define('SIZE_LIMIT_DELUXE_MB', 200);
-
-$maxMB     = $isDeluxe ? SIZE_LIMIT_DELUXE_MB : SIZE_LIMIT_FREE_MB;
-$sizeBytes = (int)($_FILES['file']['size'] ?? 0);
-
-if ($sizeBytes <= 0) jsonOut(['ok'=>false,'error'=>'Archivo vacío o inválido']);
-if ($sizeBytes > $maxMB * 1024 * 1024) {
-  jsonOut(['ok'=>false,'error'=>"Tu archivo excede el límite de {$maxMB}MB"]);
-}
-
-/* cuota por cantidad */
-$c = $pdo->prepare("SELECT COUNT(*) FROM files WHERE user_id=?");
-$c->execute([$uid]);
-$usados = (int)$c->fetchColumn();
-if ($usados >= $quotaMax) {
-  jsonOut(['ok'=>false,'error'=>'Sin espacio disponible. Contacta soporte para ampliar tu cuota.']);
-}
-
-/* ===========================
- * 4) Destino (disco)
- * =========================== */
-$root        = realpath(__DIR__.'/..') ?: dirname(__DIR__);
-$uploadsBase = defined('UPLOAD_BASE') ? UPLOAD_BASE : ($root.'/uploads');
-
-$dir = rtrim($uploadsBase,'/')."/u$uid";
-if (!is_dir($dir)) @mkdir($dir, 0775, true);
-if (!is_dir($dir) || !is_writable($dir)) {
-  jsonOut(['ok'=>false,'error'=>'No se puede escribir en uploads. Revisa permisos (chown www-data:www-data y chmod 775).'], 500);
-}
-
-$orig = $_FILES['file']['name'] ?? '';
-$ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
-$ext  = preg_replace('/[^a-z0-9_\-]/i', '', $ext);
-$ext  = $ext !== '' ? ('.'.$ext) : '';
-
-$tries = 8;
-do {
-  $fname = bin2hex(random_bytes(8)).$ext;
-  $path  = $dir.'/'.$fname;
-  $url   = rtrim(BASE_URL,'/').'/uploads/u'.$uid.'/'.$fname;
-} while (file_exists($path) && --$tries > 0);
-
-if (!move_uploaded_file($_FILES['file']['tmp_name'], $path)) {
-  jsonOut(['ok'=>false,'error'=>'No se pudo guardar el archivo'], 500);
-}
-@chmod($path, 0644);
-
-/* ===========================
- * 5) Metadatos (MIME / nombre)
- * =========================== */
-$finfo = @finfo_open(FILEINFO_MIME_TYPE);
-$mime  = $finfo ? (finfo_file($finfo, $path) ?: 'application/octet-stream') : 'application/octet-stream';
-if ($finfo) @finfo_close($finfo);
-$origName = $orig !== '' ? $orig : $fname;
-
-/* Aviso no bloqueante */
-$browserFriendly = [
-  'image/jpeg','image/png','image/webp','image/gif',
-  'audio/mpeg','audio/aac','audio/ogg',
-  'video/mp4','video/webm'
-];
-$warn = in_array($mime, $browserFriendly, true) ? null : 'Formato no estándar para navegador (se subió igual).';
-
-/* ===========================
- * 6) Insert en MariaDB (detectando columnas)
- * =========================== */
-try {
-  $q = $pdo->prepare(
-    "SELECT COUNT(DISTINCT COLUMN_NAME)
-       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME   = 'files'
-        AND COLUMN_NAME IN ('mime','orig_name')"
-  );
-  $q->execute();
-  $haveBoth = ((int)$q->fetchColumn() === 2);
-
-  if ($haveBoth) {
-    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name)
-            VALUES(?,?,?,?,?,?,?)";
-    $params = [$uid, $name, $url, $path, $sizeBytes, $mime, $origName];
-  } else {
-    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes)
-            VALUES(?,?,?,?,?)";
-    $params = [$uid, $name, $url, $path, $sizeBytes];
+  .card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px}
+  .tile{position:relative;overflow:hidden;border-radius:12px;border:1px solid #26324a;background:#0b1324}
+  .thumb{width:100%; height:220px; object-fit:cover; display:block; background:#0d1830;}
+  .thumb-audio, .thumb-file{
+    display:flex;align-items:center;justify-content:center;
+    font-size:42px;height:220px; text-transform:uppercase; letter-spacing:.5px; color:#c6d4ff;
   }
-  $pdo->prepare($sql)->execute($params);
+  .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+  .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .small{font-size:12px;color:var(--muted)}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .actions .btn{border-radius:8px;padding:7px 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>Mi galería</h1>
+      <div class="muted">Vista de todos tus <b>archivos</b> (imágenes, videos, audio y más).</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn" href="profile.php">⬅️ Volver</a>
+      <a class="btn ghost" href="list.php">📁 Ver lista</a>
+    </div>
+  </div>
 
-} catch (Throwable $e) {
-  @unlink($path);
-  $msg = $e->getMessage();
-  if (stripos($msg,'Unknown column') !== false) {
-    $hint = "Esquema desactualizado en `files`. Añade columnas con:\n".
-            "ALTER TABLE files ADD COLUMN mime VARCHAR(100) NULL, ADD COLUMN orig_name VARCHAR(191) NULL;";
-    jsonOut(['ok'=>false,'error'=>'Error al guardar en BD','hint'=>$hint], 500);
+  <div class="search">
+    <input id="q" class="input" placeholder="Buscar por nombre o parte de la URL…" autocomplete="off">
+    <button class="btn" id="qBtn" type="button">Buscar</button>
+  </div>
+  <p class="muted" id="hint" style="margin-top:6px">Se muestran hasta 150 resultados.</p>
+
+  <div id="grid" class="grid">
+    <?php if (!$initial): ?>
+      <p class="muted">Sin archivos aún.</p>
+    <?php else: foreach ($initial as $r) { echo card_from_row($r,$haveMime,$haveOrigName); } endif; ?>
+  </div>
+</div>
+
+<script>
+  const grid = document.getElementById('grid');
+  const hint = document.getElementById('hint');
+  const q    = document.getElementById('q');
+  const qBtn = document.getElementById('qBtn');
+  let ctl=null, t=null;
+
+  function esc(s){return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function cardHtml(it){
+    let media = '';
+    if (it.type==='image'){
+      media = `<img class="thumb" src="${esc(it.url)}" alt="${esc(it.name)}" loading="lazy">`;
+    } else if (it.type==='video'){
+      media = `<video class="thumb" src="${esc(it.url)}" preload="metadata" playsinline muted controls></video>`;
+    } else if (it.type==='audio'){
+      media = `<div class="thumb thumb-audio">🎵</div>`;
+    } else {
+      media = `<div class="thumb thumb-file">${esc(it.ext||'file')}</div>`;
+    }
+    return `
+      <div class="card">
+        <div class="tile">${media}</div>
+        <div class="meta">
+          <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
+          <div class="small">${esc(it.size_fmt)}</div>
+        </div>
+        <div class="small">${esc(it.created_fmt)}</div>
+        <div class="actions">
+          <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">Abrir</a>
+          <button class="btn ghost" type="button" data-url="${esc(it.url)}">Copiar URL</button>
+        </div>
+      </div>`;
   }
-  jsonOut(['ok'=>false,'error'=>'Error al guardar en la base de datos'], 500);
-}
 
-/* ===========================
- * 7) OK
- * =========================== */
-$out = ['ok'=>true,'file'=>['name'=>$name,'url'=>$url,'mime'=>$mime,'orig'=>$origName]];
-if ($warn) $out['warn'] = $warn;
-jsonOut($out);
+  async function runSearch(){
+    const s = q.value.trim();
+    if (ctl) ctl.abort(); ctl = new AbortController();
+    hint.textContent='Buscando…';
+    try{
+      const r = await fetch('gallery.php?ajax=1&q='+encodeURIComponent(s), {signal: ctl.signal});
+      const j = await r.json();
+      const items = j.items||[];
+      grid.innerHTML = items.length ? items.map(cardHtml).join('') : '<p class="muted">Sin resultados.</p>';
+      hint.textContent = s ? `Resultados para “${s}” · ${items.length}` : 'Se muestran hasta 150 resultados.';
+    }catch(e){
+      if (e.name!=='AbortError'){ grid.innerHTML='<p class="muted">Error al buscar.</p>'; hint.textContent='Intenta de nuevo.'; }
+    }
+  }
+  function deb(){ clearTimeout(t); t=setTimeout(runSearch, 280); }
+  q.addEventListener('input', deb);
+  qBtn.addEventListener('click', runSearch);
+
+  grid.addEventListener('click', async (e)=>{
+    const b=e.target.closest('button[data-url]'); if(!b) return;
+    try{ await navigator.clipboard.writeText(b.dataset.url);
+      const old=b.textContent; b.textContent='¡Copiada!'; setTimeout(()=>b.textContent=old,1200);
+    }catch{ alert('No se pudo copiar automáticamente.\n'+b.dataset.url); }
+  });
+</script>
+</body>
+</html>
