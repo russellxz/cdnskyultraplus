@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkyUltraPlus CDN — API Docs</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f8f9fa;
+      color: #222;
+      line-height: 1.6;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: linear-gradient(90deg, #4f46e5, #9333ea);
+      color: white;
+      padding: 2rem;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+    main {
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    section {
+      margin-bottom: 2.5rem;
+    }
+    h2 {
+      color: #4f46e5;
+      margin-bottom: .5rem;
+    }
+    pre {
+      background: #1e1e1e;
+      color: #f8f8f2;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.9rem;
+    }
+    code {
+      background: #eee;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    footer {
+      text-align: center;
+      padding: 2rem;
+      background: #f1f1f1;
+      margin-top: 2rem;
+      font-size: 0.9rem;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🚀 SkyUltraPlus CDN — API Docs</h1>
+    <p>Sube y comparte imágenes, videos, audios y archivos con tu propia API Key</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>🔑 Autenticación</h2>
+      <p>
+        Todas las solicitudes requieren un header con tu API Key:
+      </p>
+      <pre><code>X-API-KEY: tu_api_key</code></pre>
+      <p>
+        • <strong>Free</strong>: límite <code>5 MB</code> por archivo.<br>
+        • <strong>Deluxe</strong>: límite <code>100 MB</code>, API Key personalizada y soporte prioritario.
+      </p>
+    </section>
+
+    <section>
+      <h2>📤 Subir archivo</h2>
+      <p><strong>Endpoint</strong></p>
+      <pre><code>POST https://cdn.skyultraplus.com/upload.php</code></pre>
+
+      <p><strong>Parámetros (multipart/form-data)</strong></p>
+      <ul>
+        <li><code>file</code> (obligatorio): archivo a subir.</li>
+        <li><code>name</code> (opcional): nombre base sin extensión.</li>
+        <li><code>uploader</code> (opcional): identificador del uploader.</li>
+      </ul>
+
+      <p><strong>Ejemplo con curl</strong></p>
+      <pre><code>curl -H "X-API-KEY: TU_API_KEY" \
+-F "name=prueba" \
+-F "file=@/ruta/imagen.jpg" \
+https://cdn.skyultraplus.com/upload.php</code></pre>
+
+      <p><strong>Respuesta exitosa</strong></p>
+      <pre><code>{
+  "ok": true,
+  "file": {
+    "id": 123,
+    "url": "https://cdn.skyultraplus.com/uploads/u1/imagen.jpg",
+    "name": "prueba",
+    "size_bytes": 204800,
+    "mime": "image/jpeg"
+  }
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>⚠️ Errores comunes</h2>
+      <ul>
+        <li><code>401 Unauthorized</code>: API Key inválida o no verificada.</li>
+        <li><code>413 Payload Too Large</code>: el archivo supera el límite de tu plan.</li>
+        <li><code>500 Server Error</code>: error interno, contactar soporte si persiste.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🤖 Ejemplo en Node.js</h2>
+      <pre><code>import fetch from "node-fetch";
+import FormData from "form-data";
+import fs from "fs";
+
+const form = new FormData();
+form.append("file", fs.createReadStream("ejemplo.png"));
+form.append("name", "ejemplo");
+
+const res = await fetch("https://cdn.skyultraplus.com/upload.php", {
+  method: "POST",
+  headers: { "X-API-KEY": "TU_API_KEY", ...form.getHeaders() },
+  body: form,
+});
+
+const json = await res.json();
+console.log(json);</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    💎 SkyUltraPlus CDN — Todos los derechos reservados © 2025
+  </footer>
+</body>
+</html>
