@@ -76,14 +76,16 @@ function flash_html(string $s): string {
   .ok{ background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.5); color:#c8ffd7 }
   .err{ background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.5); color:#ffd3d3 }
 
-  /* --- bloque soporte debajo del “crear cuenta / olvidé” --- */
+  /* --- bloque soporte (compacto y poco invasivo) --- */
   .support-cta{
-    margin-top:12px;padding:12px;border-radius:12px;
-    background:rgba(15,23,42,.6);border:1px solid #2b3956
+    margin-top:10px;padding:10px;border-radius:10px;
+    background:rgba(15,23,42,.55);border:1px solid #2b3956
   }
-  .support-cta p{margin:0 0 8px}
+  .support-text{
+    margin:0 0 8px;font-size:13px;line-height:1.45;color:#94a3b8
+  }
   .support-actions{display:flex;gap:8px;flex-wrap:wrap}
-  .support-actions .btn{border-radius:9px}
+  .support-actions .btn{padding:8px 12px;font-size:13px;border-radius:8px}
 </style>
 </head>
 <body>
@@ -114,10 +116,10 @@ function flash_html(string $s): string {
       <a href="forgot.php">Olvidé mi contraseña</a>
     </p>
 
-    <!-- BLOQUE DE SOPORTE (debajo del texto anterior) -->
+    <!-- BLOQUE DE SOPORTE (compacto) -->
     <div class="support-cta">
-      <p class="muted">
-        ¿No puedes registrarte, no te llega el correo de verificación o tienes otro problema?
+      <p class="support-text">
+        ¿Problemas con el registro, verificación por correo o algo más? Podemos ayudarte.
       </p>
       <div class="support-actions">
         <a class="btn" href="support.php">💬 Hablar con soporte</a>
