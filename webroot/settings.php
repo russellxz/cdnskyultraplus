@@ -42,9 +42,10 @@ unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
 </style>
 </head><body><div class="wrap">
   <h2>⚙️ Configuración de perfil</h2>
-  <div style="margin-bottom:10px">
+  <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn" href="profile.php">⬅️ Volver al panel</a>
     <a class="btn" href="list.php">📁 Ver mis archivos</a>
+    <a class="btn" href="gallery.php">🖼️ Ir a mi galería</a><!-- NUEVO -->
   </div>
 
   <?php if($flash_ok): ?><div class="alert ok"><?=htmlspecialchars($flash_ok)?></div><?php endif; ?>
@@ -119,7 +120,6 @@ unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
 </div>
 
 <script>
-  // Toggle ver/ocultar inputs con data-target
   document.querySelectorAll('.toggle[data-target]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.getAttribute('data-target');
@@ -130,7 +130,6 @@ unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
     });
   });
 
-  // API key: ver/ocultar / copiar
   const apiI = document.getElementById('api_key');
   const showApi = document.getElementById('showApi');
   const copyApi = document.getElementById('copyApi');
@@ -144,7 +143,6 @@ unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
     catch {}
   });
 
-  // Validación en cliente (API key si es Deluxe + cambio de contraseña)
   function validateForm(){
     const isDeluxe = <?= $isDeluxe ? 'true' : 'false' ?>;
     const api = (apiI?.value||'').trim();
@@ -152,7 +150,6 @@ unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
       if (api.length < 6) { alert('La API key debe tener al menos 6 caracteres.'); apiI.focus(); return false; }
       if (!/^[A-Za-z0-9_-]{6,64}$/.test(api)) { alert('La API key sólo puede usar A-Z, a-z, 0-9, - y _. Máx. 64.'); apiI.focus(); return false; }
     }
-
     const cur = document.getElementById('current');
     const n1  = document.getElementById('new');
     const n2  = document.getElementById('new2');
