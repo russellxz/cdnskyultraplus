@@ -138,8 +138,8 @@ function su_digits($p){ return preg_replace('/\D+/', '', $p); }
 
   <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px">
     <a class="btn" href="gallery.php">🖼️ Ir a mi galería</a>
-    <a class="btn" href="list">📁 Ver todos mis archivos</a>
-    <a class="btn" href="settings">👤 Perfil / Configuración</a>
+    <a class="btn" href="list.php">📁 Ver todos mis archivos</a>
+    <a class="btn" href="settings.php">👤 Perfil / Configuración</a>
     <a class="btn" href="docs">📖 Docs API</a>
     <?php if(!empty($me['is_admin'])): ?><a class="btn" href="admin.php">🛠️ Panel Admin</a><?php endif; ?>
   </p>
