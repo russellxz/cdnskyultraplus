@@ -120,7 +120,7 @@ function su_digits($p){ return preg_replace('/\D+/', '', $p); }
   <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:center">
     <span class="pill">
       API Key:
-      <code id="apikey" data-full="<?=su_h($me['api_key'])?>" data-show="0">••••••••••••••••••••••••</code>
+      <code id="apikey" data-full="<?=su_h($me['api_key'])?>" data-show="0">••••••</code>
     </span>
     <button class="pill grad" id="toggleKey" type="button">Ver</button>
     <button class="pill grad" id="copyKey" type="button">Copiar API Key</button>
