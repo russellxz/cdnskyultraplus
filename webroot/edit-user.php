@@ -5,9 +5,7 @@ if (!isset($_GET['id'])) {
     die("ID de usuario no especificado");
 }
 
-$id = $_GET['id'];
-
-// cargar datos del usuario
+$id = intval($_GET['id']);
 $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
 $stmt->execute([$id]);
 $user = $stmt->fetch();
@@ -16,7 +14,6 @@ if (!$user) {
     die("Usuario no encontrado");
 }
 
-// guardar cambios
 if (isset($_POST['save'])) {
     $email = $_POST['email'];
     $username = $_POST['username'];
@@ -42,34 +39,39 @@ if (isset($_POST['save'])) {
         mail($email, $subject, $msg, "From: soporte@tudominio.com");
     }
 
-    echo "✅ Cambios guardados.";
+    echo "<p style='color:lime;'>✅ Cambios guardados.</p>";
 }
 ?>
 
-<h2>Editar Usuario</h2>
-<form method="post">
-  <label>Email</label>
-  <input type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>">
+<div class="card" style="max-width:600px;margin:20px auto;padding:20px">
+  <h2>Editar Usuario</h2>
+  <form method="post" class="form">
+    
+    <label>Email</label>
+    <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>">
 
-  <label>Usuario</label>
-  <input type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>">
+    <label>Usuario</label>
+    <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>">
 
-  <label>Nombre</label>
-  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>">
+    <label>Nombre</label>
+    <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>">
 
-  <label>Apellido</label>
-  <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>">
+    <label>Apellido</label>
+    <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>">
 
-  <label>Nueva contraseña</label>
-  <input type="password" name="pass" placeholder="Dejar en blanco si no cambia">
+    <label>Nueva contraseña</label>
+    <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia">
 
-  <label>Status</label>
-  <select name="status">
-    <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
-    <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
-  </select>
+    <label>Status</label>
+    <select class="input" name="status">
+      <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
+      <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
+    </select>
 
-  <br><br>
-  <button type="submit" name="save">Guardar cambios</button>
-  <a href="delete-user.php?id=<?= $user['id'] ?>" class="btn btn-danger">Borrar</a>
-</form>
+    <div style="margin-top:15px;display:flex;gap:10px">
+      <button class="btn" type="submit" name="save">💾 Guardar cambios</button>
+      <a href="delete-user.php?id=<?= $user['id'] ?>" class="btn danger">🗑️ Borrar</a>
+      <a href="admin.php" class="btn">⬅️ Volver</a>
+    </div>
+  </form>
+</div>
