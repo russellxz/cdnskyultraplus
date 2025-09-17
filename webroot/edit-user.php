@@ -1,7 +1,7 @@
 <?php
 require 'db.php';
 
-// copiar función de admin.php para que use el mismo sistema
+// función de envío (igual a admin.php)
 if (!function_exists('send_custom_email')) {
     function send_custom_email($to, $subject, $message) {
         $headers  = "MIME-Version: 1.0\r\n";
@@ -46,26 +46,24 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    // enviar correo si el estado cambió
+    // log de cambio detectado
+    error_log("DEBUG " . date("Y-m-d H:i:s") . " → old_status=$old_status | new_status=$status | user=$email");
+
+    // enviar correo si cambió el estado
     if ($old_status !== $status) {
         if ($status === 'suspended') {
             $subject = "🚫 Tu cuenta ha sido suspendida";
-            $msg = "
-            <html><body style='font-family: Arial;'>
-                <h2 style='color:#e53935;'>Cuenta suspendida</h2>
-                <p>Hola <b>$first_name</b>, tu cuenta ha sido suspendida por un administrador.</p>
-            </body></html>";
+            $msg = "<html><body><h2>Cuenta suspendida</h2><p>Hola <b>$first_name</b>, tu cuenta ha sido suspendida.</p></body></html>";
+            error_log("DEBUG " . date("Y-m-d H:i:s") . " → preparando correo de SUSPENSIÓN a $email");
         } elseif ($status === 'active' && $old_status === 'suspended') {
             $subject = "✅ Tu cuenta ha sido reactivada";
-            $msg = "
-            <html><body style='font-family: Arial;'>
-                <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
-                <p>Hola <b>$first_name</b>, tu cuenta ha sido reactivada y ya puedes ingresar de nuevo.</p>
-            </body></html>";
+            $msg = "<html><body><h2>Cuenta reactivada</h2><p>Hola <b>$first_name</b>, tu cuenta ha sido reactivada.</p></body></html>";
+            error_log("DEBUG " . date("Y-m-d H:i:s") . " → preparando correo de REACTIVACIÓN a $email");
         }
 
         if (!empty($msg)) {
-            send_custom_email($email, $subject, $msg);
+            $ok = send_custom_email($email, $subject, $msg);
+            error_log("DEBUG " . date("Y-m-d H:i:s") . " → resultado send_custom_email: " . ($ok ? "OK" : "FAIL"));
         }
     }
 
@@ -77,43 +75,44 @@ if (isset($_POST['save'])) {
   <h2 style="margin-bottom:25px;font-size:22px;">✏️ Editar Usuario</h2>
   <form method="post" class="form" style="display:flex;flex-direction:column;gap:20px">
     
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Email</label>
-      <input type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>">
+      <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Usuario</label>
-      <input type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>">
+      <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div>
-      <label>Nombre</label>
-      <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>">
+    <div style="display:flex;gap:15px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+        <label>Nombre</label>
+        <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>" style="padding:10px;border-radius:6px;width:100%">
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+        <label>Apellido</label>
+        <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>" style="padding:10px;border-radius:6px;width:100%">
+      </div>
     </div>
 
-    <div>
-      <label>Apellido</label>
-      <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>">
-    </div>
-
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Nueva contraseña</label>
-      <input type="password" name="pass" placeholder="Dejar en blanco si no cambia">
+      <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Status</label>
-      <select name="status">
+      <select class="input" name="status" style="padding:10px;border-radius:6px;width:100%">
         <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
         <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
       </select>
     </div>
 
-    <div style="margin-top:20px;">
-      <button type="submit" name="save">💾 Guardar</button>
-      <a href="delete-user.php?id=<?= $user['id'] ?>">🗑️ Borrar</a>
-      <a href="admin.php">⬅️ Volver</a>
+    <div style="margin-top:25px;display:flex;gap:15px;justify-content:flex-end">
+      <button class="btn" type="submit" name="save" style="padding:10px 20px;border-radius:6px;background:#4CAF50;color:#fff;font-weight:bold;">💾 Guardar</button>
+      <a href="delete-user.php?id=<?= $user['id'] ?>" style="padding:10px 20px;border-radius:6px;background:#e53935;color:#fff;font-weight:bold;text-decoration:none;">🗑️ Borrar</a>
+      <a href="admin.php" style="padding:10px 20px;border-radius:6px;background:#555;color:#fff;font-weight:bold;text-decoration:none;">⬅️ Volver</a>
     </div>
   </form>
 </div>
