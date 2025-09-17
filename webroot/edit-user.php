@@ -14,6 +14,9 @@ if (!$user) {
     die("Usuario no encontrado");
 }
 
+// Guardamos status actual antes de editar
+$old_status = $user['status'];
+
 if (isset($_POST['save'])) {
     $email = $_POST['email'];
     $username = $_POST['username'];
@@ -33,10 +36,17 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    if ($status === 'suspended') {
-        $subject = "Tu cuenta ha sido suspendida";
-        $msg = "Hola $first_name,\n\nTu cuenta fue suspendida por un administrador.\n\nSi crees que es un error, contacta soporte.";
-        mail($email, $subject, $msg, "From: soporte@tudominio.com");
+    // Enviar correo según cambio de estado
+    if ($old_status !== $status) {
+        if ($status === 'suspended') {
+            $subject = "Tu cuenta ha sido suspendida";
+            $msg = "Hola $first_name,\n\nTu cuenta fue suspendida por un administrador.\n\nSi crees que es un error, contacta soporte.";
+            mail($email, $subject, $msg, "From: soporte@tudominio.com");
+        } elseif ($status === 'active' && $old_status === 'suspended') {
+            $subject = "Tu cuenta ha sido reactivada";
+            $msg = "Hola $first_name,\n\nTu cuenta ha sido reactivada por el administrador.\n\nYa puedes volver a ingresar normalmente.";
+            mail($email, $subject, $msg, "From: soporte@tudominio.com");
+        }
     }
 
     echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
