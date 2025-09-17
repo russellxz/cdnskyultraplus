@@ -39,39 +39,52 @@ if (isset($_POST['save'])) {
         mail($email, $subject, $msg, "From: soporte@tudominio.com");
     }
 
-    echo "<p style='color:lime;'>✅ Cambios guardados.</p>";
+    echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
 }
 ?>
 
-<div class="card" style="max-width:600px;margin:20px auto;padding:20px">
-  <h2>Editar Usuario</h2>
-  <form method="post" class="form">
+<div class="card" style="max-width:700px;margin:30px auto;padding:25px;border-radius:12px;box-shadow:0 0 12px rgba(0,0,0,0.4);background:#1c1c28;color:#fff;">
+  <h2 style="margin-bottom:20px;">✏️ Editar Usuario</h2>
+  <form method="post" class="form" style="display:flex;flex-direction:column;gap:15px">
     
-    <label>Email</label>
-    <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>">
+    <div>
+      <label>Email</label>
+      <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" style="width:100%">
+    </div>
 
-    <label>Usuario</label>
-    <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>">
+    <div>
+      <label>Usuario</label>
+      <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>" style="width:100%">
+    </div>
 
-    <label>Nombre</label>
-    <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1">
+        <label>Nombre</label>
+        <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>" style="width:100%">
+      </div>
+      <div style="flex:1">
+        <label>Apellido</label>
+        <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>" style="width:100%">
+      </div>
+    </div>
 
-    <label>Apellido</label>
-    <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>">
+    <div>
+      <label>Nueva contraseña</label>
+      <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia" style="width:100%">
+    </div>
 
-    <label>Nueva contraseña</label>
-    <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia">
+    <div>
+      <label>Status</label>
+      <select class="input" name="status" style="width:100%">
+        <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
+        <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
+      </select>
+    </div>
 
-    <label>Status</label>
-    <select class="input" name="status">
-      <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
-      <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
-    </select>
-
-    <div style="margin-top:15px;display:flex;gap:10px">
-      <button class="btn" type="submit" name="save">💾 Guardar cambios</button>
-      <a href="delete-user.php?id=<?= $user['id'] ?>" class="btn danger">🗑️ Borrar</a>
-      <a href="admin.php" class="btn">⬅️ Volver</a>
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn" type="submit" name="save" style="background:#4CAF50;color:#fff;">💾 Guardar cambios</button>
+      <a href="delete-user.php?id=<?= $user['id'] ?>" class="btn danger" style="background:#e53935;color:#fff;">🗑️ Borrar</a>
+      <a href="admin.php" class="btn" style="background:#555;color:#fff;">⬅️ Volver</a>
     </div>
   </form>
 </div>
