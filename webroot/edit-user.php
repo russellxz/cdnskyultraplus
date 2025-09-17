@@ -39,14 +39,20 @@ if (isset($_POST['save'])) {
     // Enviar correo según cambio de estado
     if ($old_status !== $status) {
         if ($status === 'suspended') {
-            $subject = "Tu cuenta ha sido suspendida";
-            $msg = "Hola $first_name,\n\nTu cuenta fue suspendida por un administrador.\n\nSi crees que es un error, contacta soporte.";
-            mail($email, $subject, $msg, "From: soporte@tudominio.com");
-        } elseif ($status === 'active' && $old_status === 'suspended') {
-            $subject = "Tu cuenta ha sido reactivada";
-            $msg = "Hola $first_name,\n\nTu cuenta ha sido reactivada por el administrador.\n\nYa puedes volver a ingresar normalmente.";
-            mail($email, $subject, $msg, "From: soporte@tudominio.com");
-        }
+    $subject = "Tu cuenta ha sido suspendida";
+    $msg = "Hola $first_name,\n\nTu cuenta fue suspendida por un administrador.\n\nSi crees que es un error, contacta soporte.";
+    $headers = "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
+    $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
+    $headers .= "X-Mailer: PHP/" . phpversion();
+    mail($email, $subject, $msg, $headers);
+} elseif ($status === 'active' && $old_status === 'suspended') {
+    $subject = "Tu cuenta ha sido reactivada";
+    $msg = "Hola $first_name,\n\nTu cuenta ha sido reactivada por el administrador.\n\nYa puedes volver a ingresar normalmente.";
+    $headers = "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
+    $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
+    $headers .= "X-Mailer: PHP/" . phpversion();
+    mail($email, $subject, $msg, $headers);
+}
     }
 
     echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
