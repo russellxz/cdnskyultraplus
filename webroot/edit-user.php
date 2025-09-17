@@ -1,5 +1,5 @@
 <?php
-require 'db.php'; // aquí está send_custom_email()
+require_once __DIR__ . '/db.php';
 
 if (!isset($_GET['id'])) {
     die("ID de usuario no especificado");
@@ -35,27 +35,28 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    if ($old_status !== $status) {
-        $subject = "";
-        $msg = "";
+// Enviar correo según cambio de estado
+if ($old_status !== $status) {
+    $subject = "";
+    $msg = "";
 
-        if ($status === 'suspended') {
-            $subject = "🚫 Tu cuenta ha sido suspendida";
-            $msg = "<p>Hola <b>$first_name</b>,<br>Tu cuenta ha sido suspendida por un administrador.</p>";
-        } elseif ($status === 'active' && $old_status === 'suspended') {
-            $subject = "✅ Tu cuenta ha sido reactivada";
-            $msg = "<p>Hola <b>$first_name</b>,<br>Nos alegra informarte que tu cuenta ha sido reactivada.</p>";
-        }
+    if ($status === 'suspended') {
+        $subject = "🚫 Tu cuenta ha sido suspendida";
+        $msg = "<p>Hola <b>$first_name</b>, tu cuenta ha sido suspendida.</p>";
+    } elseif ($status === 'active' && $old_status === 'suspended') {
+        $subject = "✅ Tu cuenta ha sido reactivada";
+        $msg = "<p>Hola <b>$first_name</b>, tu cuenta ha sido reactivada.</p>";
+    }
 
-        if (!empty($msg)) {
-            $res = send_custom_email($email, $subject, $msg);
-            if ($res) {
-                error_log("DEBUG " . date("Y-m-d H:i:s") . " → Correo ENVIADO a $email con asunto '$subject'");
-            } else {
-                error_log("DEBUG " . date("Y-m-d H:i:s") . " → ERROR SMTP al enviar correo a $email con asunto '$subject'");
-            }
+    if (!empty($msg)) {
+        $res = send_custom_email($email, $subject, $msg);
+        if ($res) {
+            error_log("DEBUG " . date("Y-m-d H:i:s") . " → Correo ENVIADO a $email con asunto '$subject'");
+        } else {
+            error_log("DEBUG " . date("Y-m-d H:i:s") . " → ERROR al enviar correo a $email con asunto '$subject'");
         }
     }
+}
 
     echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
 }
