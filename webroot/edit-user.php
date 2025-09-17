@@ -57,7 +57,7 @@ if (isset($_POST['save'])) {
 
         <!-- header -->
         <div style='text-align:center;padding:28px 24px;border-bottom:1px solid #1f2330'>
-          <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
+          <img src='https://cdn.russellxz.click/e37b8238.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
         </div>
 
         <!-- body -->
@@ -89,7 +89,7 @@ if (isset($_POST['save'])) {
 
         <!-- footer -->
         <div style='padding:18px 24px;border-top:1px solid #1f2330;color:#6b7280;font-size:12px;text-align:center'>
-          © ".date('Y')." SkyUltraPlus — Este es un mensaje automático
+          SkyUltraPlus CDN © 2024 - ".date('Y')."  — Todos los derechos reservados
         </div>
       </div>
     </body>
@@ -107,7 +107,7 @@ elseif ($status === 'active' && $old_status === 'suspended') {
 
         <!-- header -->
         <div style='text-align:center;padding:28px 24px;border-bottom:1px solid #1f2330'>
-          <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
+          <img src='https://cdn.russellxz.click/e37b8238.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
         </div>
 
         <!-- body -->
@@ -138,7 +138,7 @@ elseif ($status === 'active' && $old_status === 'suspended') {
 
         <!-- footer -->
         <div style='padding:18px 24px;border-top:1px solid #1f2330;color:#6b7280;font-size:12px;text-align:center'>
-          © ".date('Y')." SkyUltraPlus — Este es un mensaje automático
+          SkyUltraPlus CDN © 2024 - ".date('Y')."  — Todos los derechos reservados
         </div>
       </div>
     </body>
