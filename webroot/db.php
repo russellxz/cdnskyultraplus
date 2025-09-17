@@ -369,15 +369,3 @@ function user_touch_last_ip(int $user_id, ?string $ip=null): void {
     $st->execute([$ip, $user_id]);
   } catch(Throwable $e){ /* silencioso */ }
 }
-
-function send_custom_email($to, $subject, $msg, &$err = null) {
-    $headers  = "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
-    $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
-    $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
-
-    if (!mail($to, $subject, $msg, $headers)) {
-        $err = "Error al enviar correo con mail()";
-        return false;
-    }
-    return true;
-}
