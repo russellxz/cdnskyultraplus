@@ -1,5 +1,5 @@
 <?php
-require 'db.php'; // aquí también ya tienes incluida la función send_custom_email()
+require 'db.php';
 
 if (!isset($_GET['id'])) {
     die("ID de usuario no especificado");
@@ -80,9 +80,16 @@ if (isset($_POST['save'])) {
         }
 
         if (!empty($msg)) {
-            error_log("DEBUG " . date("Y-m-d H:i:s") . " → Intentando enviar correo a $email con asunto '$subject'");
-            $result = send_custom_email($email, $subject, $msg);
-            error_log("DEBUG " . date("Y-m-d H:i:s") . " → Resultado envío: " . ($result ? "OK" : "FAIL"));
+            $headers  = "MIME-Version: 1.0\r\n";
+            $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+            $headers .= "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
+            $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
+
+            if (mail($email, $subject, $msg, $headers)) {
+                error_log("DEBUG " . date("Y-m-d H:i:s") . " → Correo ENVIADO a $email con asunto '$subject'");
+            } else {
+                error_log("DEBUG " . date("Y-m-d H:i:s") . " → ERROR al enviar correo a $email con asunto '$subject'");
+            }
         }
     }
 
