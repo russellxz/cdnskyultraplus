@@ -18,13 +18,11 @@ try {
   // ¿Ingresó un email?
   $isEmail = filter_var($user, FILTER_VALIDATE_EMAIL);
   if ($isEmail) {
-    // En registro guardamos emails en minúsculas; normalizamos entrada
     $needle = function_exists('mb_strtolower') ? mb_strtolower($user) : strtolower($user);
-    $st = $pdo->prepare("SELECT id, pass, verified FROM users WHERE email = ? LIMIT 1");
+    $st = $pdo->prepare("SELECT id, pass, verified, status FROM users WHERE email = ? LIMIT 1");
     $st->execute([$needle]);
   } else {
-    // En MySQL con utf8mb4_unicode_ci ya es case-insensitive; nada de COLLATE NOCASE
-    $st = $pdo->prepare("SELECT id, pass, verified FROM users WHERE username = ? LIMIT 1");
+    $st = $pdo->prepare("SELECT id, pass, verified, status FROM users WHERE username = ? LIMIT 1");
     $st->execute([$user]);
   }
 
@@ -34,6 +32,12 @@ try {
     $_SESSION['flash_err'] =
       'No encontramos los datos de tu cuenta — revisa usuario/correo y contraseña. ' .
       '¿Aún no te registraste? <a href="register.php"><b>Regístrate aquí</b></a>.';
+    header('Location: index.php'); exit;
+  }
+
+  // 🚨 Bloqueo de cuentas suspendidas
+  if (isset($u['status']) && $u['status'] === 'suspended') {
+    $_SESSION['flash_err'] = '❌ Tu cuenta está suspendida. Contacta al soporte.';
     header('Location: index.php'); exit;
   }
 
@@ -48,7 +52,6 @@ try {
   header('Location: profile.php'); exit;
 
 } catch (Throwable $e) {
-  // Log para debug y mensaje amable al usuario
   error_log('LOGIN_ERR: '.$e->getMessage());
   $_SESSION['flash_err'] = 'Error interno al iniciar sesión. Inténtalo de nuevo.';
   header('Location: index.php'); exit;
