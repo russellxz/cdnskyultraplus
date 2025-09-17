@@ -513,11 +513,11 @@ table input[type="number"]{width:110px}
                 <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
               </td>
               <td>
-                <button class="btn" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
-                <?php if(!$isRoot && !$isSelf): ?>
-                  <button class="btn danger" type="button" onclick="delu(<?=$u['id']?>)">Eliminar</button>
-                <?php endif; ?>
-              </td>
+  <button class="btn" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
+  <?php if(!$isRoot && !$isSelf): ?>
+    <a href="edit-user.php?id=<?=$u['id']?>" class="btn">Editar</a>
+  <?php endif; ?>
+</td>
             </tr>
           <?php endforeach; ?>
         </tbody>

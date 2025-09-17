@@ -59,8 +59,12 @@ try {
  *  Esquema (idempotente)
  * =========================== */
 $ddl = <<<SQL
+ALTER TABLE users 
+  ADD COLUMN status ENUM('active','suspended') DEFAULT 'active' AFTER verify_token;
+
 CREATE TABLE IF NOT EXISTS users (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  status          ENUM('active','suspended') DEFAULT 'active', 
   email           VARCHAR(191) NOT NULL UNIQUE,
   username        VARCHAR(191) UNIQUE,
   first_name      VARCHAR(100),
