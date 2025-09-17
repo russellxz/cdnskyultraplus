@@ -664,7 +664,7 @@ function rowHtml(u, selfId, rootEmail){
       <td>
         <div class="actions">
           <button class="btn" type="button" onclick="upd(${u.id})">Guardar</button>
-          ${(!isRoot && !isSelf) ? `<button class="btn danger" type="button" onclick="delu(${u.id})">Eliminar</button>`:''}
+          ${(!isRoot && !isSelf) ? `<a href="edit-user.php?id=${u.id}" class="btn info">Editar</a>`:''}
         </div>
       </td>
     </tr>
