@@ -36,16 +36,52 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    // Enviar correo según cambio de estado usando SMTP
+    // Enviar correo según cambio de estado
     if ($old_status !== $status) {
         if ($status === 'suspended') {
-            $subject = "Tu cuenta ha sido suspendida";
-            $msg = "Hola $first_name,<br><br>Tu cuenta fue suspendida por un administrador.<br><br>Si crees que es un error, contacta soporte.";
-            send_custom_email($email, $subject, $msg, $err);
+            $subject = "🚫 Tu cuenta ha sido suspendida";
+            $msg = "
+            <html>
+            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
+                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
+                    <div style='text-align:center;'>
+                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
+                        <h2 style='color:#e53935;'>Cuenta suspendida</h2>
+                    </div>
+                    <p>Hola <b>$first_name</b>,</p>
+                    <p>Tu cuenta ha sido <b>suspendida</b> por un administrador.</p>
+                    <p>Si crees que es un error, por favor contacta a nuestro equipo de soporte.</p>
+                    <br>
+                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
+                </div>
+            </body>
+            </html>";
         } elseif ($status === 'active' && $old_status === 'suspended') {
-            $subject = "Tu cuenta ha sido reactivada";
-            $msg = "Hola $first_name,<br><br>Tu cuenta ha sido reactivada por el administrador.<br><br>Ya puedes volver a ingresar normalmente.";
-            send_custom_email($email, $subject, $msg, $err);
+            $subject = "✅ Tu cuenta ha sido reactivada";
+            $msg = "
+            <html>
+            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
+                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
+                    <div style='text-align:center;'>
+                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
+                        <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
+                    </div>
+                    <p>Hola <b>$first_name</b>,</p>
+                    <p>Nos alegra informarte que tu cuenta ha sido <b>reactivada</b> por el administrador.</p>
+                    <p>Ya puedes volver a ingresar normalmente y disfrutar de nuestros servicios.</p>
+                    <br>
+                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
+                </div>
+            </body>
+            </html>";
+        }
+
+        if (!empty($msg)) {
+            $headers  = "MIME-Version: 1.0\r\n";
+            $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+            $headers .= "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
+            $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
+            mail($email, $subject, $msg, $headers);
         }
     }
 
