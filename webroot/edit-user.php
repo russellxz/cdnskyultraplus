@@ -1,6 +1,17 @@
 <?php
 require 'db.php';
 
+// --- función de correo igual a la de admin.php ---
+if (!function_exists('send_custom_email')) {
+    function send_custom_email($to, $subject, $message) {
+        $headers  = "MIME-Version: 1.0\r\n";
+        $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+        $headers .= "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
+        $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
+        return mail($to, $subject, $message, $headers);
+    }
+}
+
 if (!isset($_GET['id'])) {
     die("ID de usuario no especificado");
 }
@@ -41,47 +52,26 @@ if (isset($_POST['save'])) {
         if ($status === 'suspended') {
             $subject = "🚫 Tu cuenta ha sido suspendida";
             $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#e53935;'>Cuenta suspendida</h2>
-                    </div>
-                    <p>Hola <b>$first_name</b>,</p>
-                    <p>Tu cuenta ha sido <b>suspendida</b> por un administrador.</p>
-                    <p>Si crees que es un error, por favor contacta a nuestro equipo de soporte.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
+            <html><body style='font-family: Arial; background:#f9f9f9; padding:20px;'>
+                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px;'>
+                    <h2 style='color:#e53935;'>Cuenta suspendida</h2>
+                    <p>Hola <b>$first_name</b>, tu cuenta ha sido suspendida por un administrador.</p>
+                    <p>Si crees que es un error, por favor contacta al soporte.</p>
                 </div>
-            </body>
-            </html>";
+            </body></html>";
         } elseif ($status === 'active' && $old_status === 'suspended') {
             $subject = "✅ Tu cuenta ha sido reactivada";
             $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
-                    </div>
-                    <p>Hola <b>$first_name</b>,</p>
-                    <p>Nos alegra informarte que tu cuenta ha sido <b>reactivada</b> por el administrador.</p>
-                    <p>Ya puedes volver a ingresar normalmente y disfrutar de nuestros servicios.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
+            <html><body style='font-family: Arial; background:#f9f9f9; padding:20px;'>
+                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px;'>
+                    <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
+                    <p>Hola <b>$first_name</b>, tu cuenta ha sido reactivada y ya puedes volver a ingresar.</p>
                 </div>
-            </body>
-            </html>";
+            </body></html>";
         }
 
         if (!empty($msg)) {
-            $headers  = "MIME-Version: 1.0\r\n";
-            $headers .= "Content-type: text/html; charset=UTF-8\r\n";
-            $headers .= "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
-            $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
-            mail($email, $subject, $msg, $headers);
+            send_custom_email($email, $subject, $msg);
         }
     }
 
