@@ -75,9 +75,6 @@ CREATE TABLE IF NOT EXISTS users (
   registration_ip VARCHAR(45),
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-ALTER TABLE users 
-  ADD COLUMN status ENUM('active','suspended') DEFAULT 'active' AFTER verify_token;
   
 CREATE TABLE IF NOT EXISTS files (
   id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
