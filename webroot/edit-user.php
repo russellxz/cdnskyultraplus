@@ -1,5 +1,5 @@
 <?php
-require 'db.php';
+require 'db.php'; // aquí está send_custom_email()
 
 if (!isset($_GET['id'])) {
     die("ID de usuario no especificado");
@@ -14,7 +14,6 @@ if (!$user) {
     die("Usuario no encontrado");
 }
 
-// Guardamos status actual antes de editar
 $old_status = $user['status'];
 
 if (isset($_POST['save'])) {
@@ -36,59 +35,24 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    // Enviar correo según cambio de estado
     if ($old_status !== $status) {
         $subject = "";
         $msg = "";
 
         if ($status === 'suspended') {
             $subject = "🚫 Tu cuenta ha sido suspendida";
-            $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#e53935;'>Cuenta suspendida</h2>
-                    </div>
-                    <p>Hola <b>$first_name</b>,</p>
-                    <p>Tu cuenta ha sido <b>suspendida</b> por un administrador.</p>
-                    <p>Si crees que es un error, por favor contacta a nuestro equipo de soporte.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
-                </div>
-            </body>
-            </html>";
+            $msg = "<p>Hola <b>$first_name</b>,<br>Tu cuenta ha sido suspendida por un administrador.</p>";
         } elseif ($status === 'active' && $old_status === 'suspended') {
             $subject = "✅ Tu cuenta ha sido reactivada";
-            $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
-                    </div>
-                    <p>Hola <b>$first_name</b>,</p>
-                    <p>Nos alegra informarte que tu cuenta ha sido <b>reactivada</b> por el administrador.</p>
-                    <p>Ya puedes volver a ingresar normalmente y disfrutar de nuestros servicios.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
-                </div>
-            </body>
-            </html>";
+            $msg = "<p>Hola <b>$first_name</b>,<br>Nos alegra informarte que tu cuenta ha sido reactivada.</p>";
         }
 
         if (!empty($msg)) {
-            $headers  = "MIME-Version: 1.0\r\n";
-            $headers .= "Content-type: text/html; charset=UTF-8\r\n";
-            $headers .= "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
-            $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
-
-            if (mail($email, $subject, $msg, $headers)) {
+            $res = send_custom_email($email, $subject, $msg);
+            if ($res) {
                 error_log("DEBUG " . date("Y-m-d H:i:s") . " → Correo ENVIADO a $email con asunto '$subject'");
             } else {
-                error_log("DEBUG " . date("Y-m-d H:i:s") . " → ERROR al enviar correo a $email con asunto '$subject'");
+                error_log("DEBUG " . date("Y-m-d H:i:s") . " → ERROR SMTP al enviar correo a $email con asunto '$subject'");
             }
         }
     }
@@ -96,6 +60,7 @@ if (isset($_POST['save'])) {
     echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
 }
 ?>
+
 
 <div class="card" style="max-width:800px;margin:40px auto;padding:30px;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,0.5);background:#1c1c28;color:#fff;">
   <h2 style="margin-bottom:25px;font-size:22px;">✏️ Editar Usuario</h2>
