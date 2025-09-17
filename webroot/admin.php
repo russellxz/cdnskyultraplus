@@ -201,25 +201,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
       $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
       $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
-      $uname = trim($_POST['username'] ?? '');
-      $pwd   = trim($_POST['password'] ?? '');
 
       if ($isRootTarget || $isSelf) $adm = 1;
 
-      if ($pwd !== '') {
-        $hash = password_hash($pwd, PASSWORD_DEFAULT);
-        $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=?, username=?, password=? WHERE id=?");
-        $st->execute([$api, $adm, $dlx, $quota, $uname, $hash, $id]);
-      } else {
-        $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=?, username=? WHERE id=?");
-        $st->execute([$api, $adm, $dlx, $quota, $uname, $id]);
-      }
+      $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?");
+      $st->execute([$api, $adm, $dlx, $quota, $id]);
 
       exit('OK');
     }catch(Throwable $e){
       exit('Error al guardar');
     }
-}
+  }
 
   if ($action === 'user_delete') {
     try{
@@ -369,9 +361,9 @@ table input[type="number"]{width:110px}
 <body>
 <div class="wrap">
   <h2>Panel Admin</h2>
-  
+
 <div class="card">
-  <h3>📊 Estadísticas Globales</h3>
+  <h3>📊 Estadísticas</h3>
   <p>👥 Total usuarios: <b><?=$totUsers?></b></p>
   <p>📂 Archivos subidos: <b><?=$totFiles?></b></p>
 </div>
@@ -495,10 +487,7 @@ table input[type="number"]{width:110px}
             ?>
             <tr>
               <td><?=$u['id']?></td>
-              <td>
-  <input class="input" id="un<?=$u['id']?>" value="<?=h($u['username'])?>">
-  <input class="input" id="pw<?=$u['id']?>" type="password" placeholder="Nueva contraseña">
-</td>
+              <td><?=h($u['username'])?></td>
               <td><?=h(trim(($u['first_name']??'').' '.($u['last_name']??'')))?></td>
               <td><?=h($u['email'])?> <?=$isSelf?'<span class="badge">tú</span>':''?></td>
               <td><?=$u['verified']?'✔️':'—'?></td>
@@ -623,8 +612,6 @@ async function upd(id){
   fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
   fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
   fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
-  fd.append('username', document.getElementById('un'+id)?.value||'');
-fd.append('password', document.getElementById('pw'+id)?.value||'');
   const r=await fetch('admin.php',{method:'POST',body:fd});
   alert(await r.text());
   runSearch(false);
