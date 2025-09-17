@@ -36,23 +36,17 @@ if (isset($_POST['save'])) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    // Enviar correo según cambio de estado
+    // Enviar correo según cambio de estado usando SMTP
     if ($old_status !== $status) {
         if ($status === 'suspended') {
-    $subject = "Tu cuenta ha sido suspendida";
-    $msg = "Hola $first_name,\n\nTu cuenta fue suspendida por un administrador.\n\nSi crees que es un error, contacta soporte.";
-    $headers = "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
-    $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
-    $headers .= "X-Mailer: PHP/" . phpversion();
-    mail($email, $subject, $msg, $headers);
-} elseif ($status === 'active' && $old_status === 'suspended') {
-    $subject = "Tu cuenta ha sido reactivada";
-    $msg = "Hola $first_name,\n\nTu cuenta ha sido reactivada por el administrador.\n\nYa puedes volver a ingresar normalmente.";
-    $headers = "From: SkyUltraPlus <soporte@skyultraplus.com>\r\n";
-    $headers .= "Reply-To: soporte@skyultraplus.com\r\n";
-    $headers .= "X-Mailer: PHP/" . phpversion();
-    mail($email, $subject, $msg, $headers);
-}
+            $subject = "Tu cuenta ha sido suspendida";
+            $msg = "Hola $first_name,<br><br>Tu cuenta fue suspendida por un administrador.<br><br>Si crees que es un error, contacta soporte.";
+            send_custom_email($email, $subject, $msg, $err);
+        } elseif ($status === 'active' && $old_status === 'suspended') {
+            $subject = "Tu cuenta ha sido reactivada";
+            $msg = "Hola $first_name,<br><br>Tu cuenta ha sido reactivada por el administrador.<br><br>Ya puedes volver a ingresar normalmente.";
+            send_custom_email($email, $subject, $msg, $err);
+        }
     }
 
     echo "<p style='color:lime;font-weight:bold;text-align:center;'>✅ Cambios guardados.</p>";
