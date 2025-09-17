@@ -6,10 +6,6 @@ if (session_status() === PHP_SESSION_NONE) { session_start(); }
 if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid = (int)$_SESSION['uid'];
 
-// ==== Estadísticas para admin ====
-$totalUsuarios = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$totalArchivos = $pdo->query("SELECT COUNT(*) FROM uploads")->fetchColumn();
-
 /* ========= Polyfills por compat ========= */
 if (!function_exists('str_starts_with')) {
   function str_starts_with(string $haystack, string $needle): bool {
@@ -202,17 +198,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $adm   = !empty($_POST['is_admin'])  ? 1 : 0;
       $dlx   = !empty($_POST['is_deluxe']) ? 1 : 0;
       $quota = max(0, (int)($_POST['quota_limit'] ?? 50));
+      $uname = trim($_POST['username'] ?? '');
+      $pwd   = trim($_POST['password'] ?? '');
 
       if ($isRootTarget || $isSelf) $adm = 1;
 
-      $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=? WHERE id=?");
-      $st->execute([$api, $adm, $dlx, $quota, $id]);
+      if ($pwd !== '') {
+        $hash = password_hash($pwd, PASSWORD_DEFAULT);
+        $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=?, username=?, password=? WHERE id=?");
+        $st->execute([$api, $adm, $dlx, $quota, $uname, $hash, $id]);
+      } else {
+        $st = $pdo->prepare("UPDATE users SET api_key=?, is_admin=?, is_deluxe=?, quota_limit=?, username=? WHERE id=?");
+        $st->execute([$api, $adm, $dlx, $quota, $uname, $id]);
+      }
 
       exit('OK');
     }catch(Throwable $e){
       exit('Error al guardar');
     }
-  }
+}
 
   if ($action === 'user_delete') {
     try{
@@ -362,45 +366,38 @@ table input[type="number"]{width:110px}
 <body>
 <div class="wrap">
   <h2>Panel Admin</h2>
-
-<div class="card mb-3">
-  <div class="card-body text-center">
-    <h3>📊 Estadísticas generales</h3>
-    <p>👤 Total de usuarios: <b><?= $totalUsuarios ?></b></p>
-    <p>📂 Total de archivos subidos: <b><?= $totalArchivos ?></b></p>
-  </div>
-</div>
-
-<!-- MONITOREO EN TIEMPO REAL -->
+  
+$totUsers = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+$totFiles = $pdo->query("SELECT COUNT(*) FROM files")->fetchColumn();
+?>
 <div class="card">
-  <h3>Monitoreo del servidor</h3>
-  <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
-  <div class="grid3" style="margin-top:10px">
-    <div class="kpi">
-      <h4>CPU</h4>
-      <canvas id="cpuChart" class="spark" width="400" height="120"></canvas>
-      <div class="muted">Uso: <b id="cpuTxt">--%</b></div>
-    </div>
-    <div class="kpi">
-      <h4>Memoria</h4>
-      <canvas id="memChart" class="spark" width="400" height="120"></canvas>
-      <div class="muted">Uso: <b id="memTxt">--%</b> · <span id="memDetail"></span></div>
-    </div>
-    <div class="kpi">
-      <h4>Disco (uploads)</h4>
-      <div class="bar"><div id="diskFill" class="fill" style="width:0%"></div></div>
-      <div class="muted" style="margin-top:6px">Uso: <b id="diskTxt">--%</b> · <span id="diskDetail"></span></div>
-    </div>
-  </div>
+  <h3>📊 Estadísticas Globales</h3>
+  <p>👥 Total usuarios: <b><?=$totUsers?></b></p>
+  <p>📂 Archivos subidos: <b><?=$totFiles?></b></p>
 </div>
 
-<div class="card mb-3">
-  <div class="card-body text-center">
-    <h3>📊 Estadísticas generales</h3>
-    <p>👤 Total de usuarios: <b><?= $totalUsuarios ?></b></p>
-    <p>📂 Total de archivos subidos: <b><?= $totalArchivos ?></b></p>
+  <!-- MONITOREO EN TIEMPO REAL -->
+  <div class="card">
+    <h3>Monitoreo del servidor</h3>
+    <div class="muted" id="metaUptime">Uptime: — · Carga: —</div>
+    <div class="grid3" style="margin-top:10px">
+      <div class="kpi">
+        <h4>CPU</h4>
+        <canvas id="cpuChart" class="spark" width="400" height="120"></canvas>
+        <div class="muted">Uso: <b id="cpuTxt">--%</b></div>
+      </div>
+      <div class="kpi">
+        <h4>Memoria</h4>
+        <canvas id="memChart" class="spark" width="400" height="120"></canvas>
+        <div class="muted">Uso: <b id="memTxt">--%</b> · <span id="memDetail"></span></div>
+      </div>
+      <div class="kpi">
+        <h4>Disco (uploads)</h4>
+        <div class="bar"><div id="diskFill" class="fill" style="width:0%"></div></div>
+        <div class="muted" style="margin-top:6px">Uso: <b id="diskTxt">--%</b> · <span id="diskDetail"></span></div>
+      </div>
+    </div>
   </div>
-</div>
 
   <div class="card">
     <b>Bloqueo por IP:</b> <span id="ipstate"><?= $ipon ? 'ON' : 'OFF' ?></span>
@@ -498,7 +495,10 @@ table input[type="number"]{width:110px}
             ?>
             <tr>
               <td><?=$u['id']?></td>
-              <td><?=h($u['username'])?></td>
+              <td>
+  <input class="input" id="un<?=$u['id']?>" value="<?=h($u['username'])?>">
+  <input class="input" id="pw<?=$u['id']?>" type="password" placeholder="Nueva contraseña">
+</td>
               <td><?=h(trim(($u['first_name']??'').' '.($u['last_name']??'')))?></td>
               <td><?=h($u['email'])?> <?=$isSelf?'<span class="badge">tú</span>':''?></td>
               <td><?=$u['verified']?'✔️':'—'?></td>
@@ -524,7 +524,6 @@ table input[type="number"]{width:110px}
                 <button class="btn" type="button" onclick="regen(<?=$u['id']?>)">🔁</button>
               </td>
               <td>
-              <a href="edit_user.php?id=<?=$u['id']?>" class="btn btn-sm btn-primary">✏️ Editar</a>
                 <button class="btn" type="button" onclick="upd(<?=$u['id']?>)">Guardar</button>
                 <?php if(!$isRoot && !$isSelf): ?>
                   <button class="btn danger" type="button" onclick="delu(<?=$u['id']?>)">Eliminar</button>
@@ -624,6 +623,8 @@ async function upd(id){
   fd.append('is_admin', document.getElementById('ad'+id)?.checked ? '1':'0');
   fd.append('is_deluxe', document.getElementById('dx'+id)?.checked ? '1':'0');
   fd.append('quota_limit', document.getElementById('qt'+id)?.value||'0');
+  fd.append('username', document.getElementById('un'+id)?.value||'');
+fd.append('password', document.getElementById('pw'+id)?.value||'');
   const r=await fetch('admin.php',{method:'POST',body:fd});
   alert(await r.text());
   runSearch(false);
