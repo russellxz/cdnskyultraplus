@@ -43,48 +43,48 @@ if (isset($_POST['save'])) {
 }
 ?>
 
-<div class="card" style="max-width:700px;margin:30px auto;padding:25px;border-radius:12px;box-shadow:0 0 12px rgba(0,0,0,0.4);background:#1c1c28;color:#fff;">
-  <h2 style="margin-bottom:20px;">✏️ Editar Usuario</h2>
-  <form method="post" class="form" style="display:flex;flex-direction:column;gap:15px">
+<div class="card" style="max-width:800px;margin:40px auto;padding:30px;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,0.5);background:#1c1c28;color:#fff;">
+  <h2 style="margin-bottom:25px;font-size:22px;">✏️ Editar Usuario</h2>
+  <form method="post" class="form" style="display:flex;flex-direction:column;gap:20px">
     
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Email</label>
-      <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" style="width:100%">
+      <input class="input" type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Usuario</label>
-      <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>" style="width:100%">
+      <input class="input" type="text" name="username" value="<?= htmlspecialchars($user['username']) ?>" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div style="display:flex;gap:10px">
-      <div style="flex:1">
+    <div style="display:flex;gap:15px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
         <label>Nombre</label>
-        <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>" style="width:100%">
+        <input class="input" type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>" style="padding:10px;border-radius:6px;width:100%">
       </div>
-      <div style="flex:1">
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
         <label>Apellido</label>
-        <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>" style="width:100%">
+        <input class="input" type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>" style="padding:10px;border-radius:6px;width:100%">
       </div>
     </div>
 
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Nueva contraseña</label>
-      <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia" style="width:100%">
+      <input class="input" type="password" name="pass" placeholder="Dejar en blanco si no cambia" style="padding:10px;border-radius:6px;width:100%">
     </div>
 
-    <div>
+    <div style="display:flex;flex-direction:column;gap:6px">
       <label>Status</label>
-      <select class="input" name="status" style="width:100%">
+      <select class="input" name="status" style="padding:10px;border-radius:6px;width:100%">
         <option value="active" <?= $user['status']=='active'?'selected':'' ?>>Activo</option>
         <option value="suspended" <?= $user['status']=='suspended'?'selected':'' ?>>Suspendido</option>
       </select>
     </div>
 
-    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn" type="submit" name="save" style="background:#4CAF50;color:#fff;">💾 Guardar cambios</button>
-      <a href="delete-user.php?id=<?= $user['id'] ?>" class="btn danger" style="background:#e53935;color:#fff;">🗑️ Borrar</a>
-      <a href="admin.php" class="btn" style="background:#555;color:#fff;">⬅️ Volver</a>
+    <div style="margin-top:25px;display:flex;gap:15px;justify-content:flex-end">
+      <button class="btn" type="submit" name="save" style="padding:10px 20px;border-radius:6px;background:#4CAF50;color:#fff;font-weight:bold;">💾 Guardar</button>
+      <a href="delete-user.php?id=<?= $user['id'] ?>" style="padding:10px 20px;border-radius:6px;background:#e53935;color:#fff;font-weight:bold;text-decoration:none;">🗑️ Borrar</a>
+      <a href="admin.php" style="padding:10px 20px;border-radius:6px;background:#555;color:#fff;font-weight:bold;text-decoration:none;">⬅️ Volver</a>
     </div>
   </form>
 </div>
