@@ -47,44 +47,104 @@ if (isset($_POST['save'])) {
         $msg     = '';
 
         if ($status === 'suspended') {
-            $subject = "🚫 Tu cuenta ha sido suspendida";
-            $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#e53935;'>Cuenta suspendida</h2>
-                    </div>
-                    <p>Hola <b>{$first_name}</b>,</p>
-                    <p>Tu cuenta ha sido <b>suspendida</b> por un administrador.</p>
-                    <p>Si crees que es un error, por favor contacta a nuestro equipo de soporte.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
-                </div>
-            </body>
-            </html>";
-            error_log("DEBUG " . date("Y-m-d H:i:s") . " → preparando correo de SUSPENSIÓN a {$email}");
-        } elseif ($status === 'active' && $old_status === 'suspended') {
-            $subject = "✅ Tu cuenta ha sido reactivada";
-            $msg = "
-            <html>
-            <body style='font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;'>
-                <div style='max-width:600px; margin:auto; background:white; border-radius:8px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-                    <div style='text-align:center;'>
-                        <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px; margin-bottom:20px;'>
-                        <h2 style='color:#4CAF50;'>Cuenta reactivada</h2>
-                    </div>
-                    <p>Hola <b>{$first_name}</b>,</p>
-                    <p>Nos alegra informarte que tu cuenta ha sido <b>reactivada</b> por el administrador.</p>
-                    <p>Ya puedes volver a ingresar normalmente y disfrutar de nuestros servicios.</p>
-                    <br>
-                    <p style='color:#777;'>Atentamente,<br>El equipo de <b>SkyUltraPlus</b></p>
-                </div>
-            </body>
-            </html>";
-            error_log("DEBUG " . date("Y-m-d H:i:s") . " → preparando correo de REACTIVACIÓN a {$email}");
-        }
+    $subject = "🚫 Tu cuenta ha sido suspendida";
+    $msg = "
+    <html>
+    <body style='margin:0;padding:0;background:#0f1115;font-family:Arial,Helvetica,sans-serif;'>
+      <div style='max-width:640px;margin:0 auto;background:#12141b;color:#fff'>
+        <!-- preheader -->
+        <div style='display:none;opacity:0;height:0;overflow:hidden'>Tu cuenta ha sido suspendida</div>
+
+        <!-- header -->
+        <div style='text-align:center;padding:28px 24px;border-bottom:1px solid #1f2330'>
+          <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
+        </div>
+
+        <!-- body -->
+        <div style='padding:28px 24px'>
+          <h1 style='margin:0 0 10px;font-size:24px;line-height:1.3;color:#ff4d4f'>Cuenta suspendida</h1>
+          <p style='margin:0 0 12px;color:#cfd3dc;font-size:15px'>Hola <b style=\"color:#fff;\">{$first_name}</b>,</p>
+          <p style='margin:0 0 12px;color:#cfd3dc;font-size:15px'>
+            Tu cuenta ha sido <b style='color:#fff'>suspendida</b> por un administrador.
+          </p>
+          <p style='margin:0 20px 22px;color:#9aa3af;font-size:13px'>
+            Si crees que es un error o necesitas más información, contacta a nuestro equipo de soporte.
+          </p>
+
+          <!-- CTA -->
+          <div style='text-align:center;margin:22px 0 8px'>
+            <a href='https://skyultraplus.com/discord' target='_blank'
+               style='display:inline-block;background:#5865F2;color:#fff;text-decoration:none;
+                      padding:12px 20px;border-radius:10px;font-weight:bold'>
+              Contactar soporte
+            </a>
+          </div>
+
+          <!-- note -->
+          <p style='margin:16px 0 0;color:#6b7280;font-size:12px;text-align:center'>
+            También puedes copiar y pegar este enlace en tu navegador:<br>
+            <span style='color:#9CA3AF'>https://skyultraplus.com/discord</span>
+          </p>
+        </div>
+
+        <!-- footer -->
+        <div style='padding:18px 24px;border-top:1px solid #1f2330;color:#6b7280;font-size:12px;text-align:center'>
+          © ".date('Y')." SkyUltraPlus — Este es un mensaje automático
+        </div>
+      </div>
+    </body>
+    </html>";
+    error_log('DEBUG '.date('Y-m-d H:i:s').' → preparando correo de SUSPENSIÓN a '.$email);
+}
+elseif ($status === 'active' && $old_status === 'suspended') {
+    $subject = "✅ Tu cuenta ha sido reactivada";
+    $msg = "
+    <html>
+    <body style='margin:0;padding:0;background:#0f1115;font-family:Arial,Helvetica,sans-serif;'>
+      <div style='max-width:640px;margin:0 auto;background:#12141b;color:#fff'>
+        <!-- preheader -->
+        <div style='display:none;opacity:0;height:0;overflow:hidden'>Tu cuenta fue reactivada</div>
+
+        <!-- header -->
+        <div style='text-align:center;padding:28px 24px;border-bottom:1px solid #1f2330'>
+          <img src='https://cdn.russellxz.click/logo-skyultraplus.png' alt='SkyUltraPlus' style='max-width:180px;height:auto'>
+        </div>
+
+        <!-- body -->
+        <div style='padding:28px 24px'>
+          <h1 style='margin:0 0 10px;font-size:24px;line-height:1.3;color:#22c55e'>Cuenta reactivada</h1>
+          <p style='margin:0 0 12px;color:#cfd3dc;font-size:15px'>Hola <b style=\"color:#fff;\">{$first_name}</b>,</p>
+          <p style='margin:0 0 12px;color:#cfd3dc;font-size:15px'>
+            Nos alegra informarte que tu cuenta ha sido <b style='color:#fff'>reactivada</b>.
+          </p>
+          <p style='margin:0 20px 22px;color:#9aa3af;font-size:13px'>
+            Si tienes alguna duda o ves algo raro en tu cuenta, contáctanos.
+          </p>
+
+          <!-- CTA -->
+          <div style='text-align:center;margin:22px 0 8px'>
+            <a href='https://skyultraplus.com/discord' target='_blank'
+               style='display:inline-block;background:#5865F2;color:#fff;text-decoration:none;
+                      padding:12px 20px;border-radius:10px;font-weight:bold'>
+              Contactar soporte
+            </a>
+          </div>
+
+          <!-- note -->
+          <p style='margin:16px 0 0;color:#6b7280;font-size:12px;text-align:center'>
+            Enlace directo: <span style='color:#9CA3AF'>https://skyultraplus.com/discord</span>
+          </p>
+        </div>
+
+        <!-- footer -->
+        <div style='padding:18px 24px;border-top:1px solid #1f2330;color:#6b7280;font-size:12px;text-align:center'>
+          © ".date('Y')." SkyUltraPlus — Este es un mensaje automático
+        </div>
+      </div>
+    </body>
+    </html>";
+    error_log('DEBUG '.date('Y-m-d H:i:s').' → preparando correo de REACTIVACIÓN a '.$email);
+}
 
         if ($subject !== '' && $msg !== '') {
             // Usa la MISMA función que admin.php/forgot.php (firma con 4 parámetros)
