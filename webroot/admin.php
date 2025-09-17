@@ -21,6 +21,9 @@ try {
 } catch(Throwable $e){ $me = null; }
 if (!$me || (int)$me['is_admin'] !== 1) { http_response_code(403); exit('403'); }
 
+$totUsers = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+$totFiles = $pdo->query("SELECT COUNT(*) FROM files")->fetchColumn();
+
 /* ========= Helpers ========= */
 function json_out(array $a, int $code=200){
   http_response_code($code);
@@ -367,9 +370,6 @@ table input[type="number"]{width:110px}
 <div class="wrap">
   <h2>Panel Admin</h2>
   
-$totUsers = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$totFiles = $pdo->query("SELECT COUNT(*) FROM files")->fetchColumn();
-?>
 <div class="card">
   <h3>📊 Estadísticas Globales</h3>
   <p>👥 Total usuarios: <b><?=$totUsers?></b></p>
