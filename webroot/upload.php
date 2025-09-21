@@ -176,20 +176,22 @@ try {
   $haveBoth = ((int)$q->fetchColumn() === 2);
 
   if ($haveBoth) {
-    $st = $pdo->prepare("INSERT INTO files (user_id, name, url, path, size_bytes, created_at)
-                     VALUES (?,?,?,?,?,NOW())");
-$st->execute([$uid, $fname, $url, $dest, $fsize]);
-
-// 🔥 Aquí sumamos al contador de archivos usados
-$pdo->prepare("UPDATE users SET used_files = used_files + 1 WHERE id=?")
-    ->execute([$uid]);
+    $sql = "INSERT INTO files(user_id,name,url,path,size_bytes,mime,orig_name)
+            VALUES(?,?,?,?,?,?,?)";
     $params = [$uid,$name,$url,$path,$sizeBytes,$mime,$origName];
   } else {
     $sql = "INSERT INTO files(user_id,name,url,path,size_bytes)
             VALUES(?,?,?,?,?)";
     $params = [$uid,$name,$url,$path,$sizeBytes];
   }
+
+  // Ejecuta el insert
   $pdo->prepare($sql)->execute($params);
+
+  // 🔥 actualizar contador de usados
+  $pdo->prepare("UPDATE users SET used_files = used_files + 1 WHERE id=?")
+      ->execute([$uid]);
+
 } catch (Throwable $e) {
   @unlink($path);
   $msg = $e->getMessage();
