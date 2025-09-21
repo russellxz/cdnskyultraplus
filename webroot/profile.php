@@ -5,9 +5,10 @@ if (empty($_SESSION['uid'])) { header('Location: index.php'); exit; }
 $uid=(int)$_SESSION['uid'];
 
 /* Datos del usuario */
-$st=$pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,api_key FROM users WHERE id=?");
+$st = $pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,used_files,api_key FROM users WHERE id=?");
 $st->execute([$uid]);
-$me=$st->fetch();
+$me = $st->fetch();
+$disponibles = max(0, $me['quota_limit'] - $me['used_files']);
 if(!$me){ header('Location: logout.php'); exit; }
 
 /* Conteo de archivos usados y espacio restante */
@@ -124,7 +125,7 @@ function su_digits($p){ return preg_replace('/\D+/', '', $p); }
     </span>
     <button class="pill grad" id="toggleKey" type="button">Ver</button>
     <button class="pill grad" id="copyKey" type="button">Copiar API Key</button>
-    <span class="pill grad">Disponibles: <b><?=$remain?></b></span>
+    <span class="pill grad">Disponibles: <b><?=$disponibles?></b></span>
     <span class="pill">Límite por archivo: <b><?=$maxMB?>MB</b></span>
   </div>
 
