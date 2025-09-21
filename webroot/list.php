@@ -11,12 +11,9 @@ try {
                          AND INDEX_NAME  = 'files_userid_name'");
   $ix->execute();
   if ((int)$ix->fetchColumn() === 0) {
-    // name puede ser TEXT en algunos despliegues → prefix length (191)
     $pdo->exec("ALTER TABLE files ADD INDEX files_userid_name (user_id, name(191))");
   }
-} catch (Throwable $e) {
-  // Silencioso: si no tenemos permisos o ya existe, seguimos.
-}
+} catch (Throwable $e) {}
 
 /* ==== Helpers ==== */
 function bytes_fmt($b){
@@ -36,12 +33,26 @@ function json_out($arr, $code=200){
   exit;
 }
 
+/* ==== Endpoint eliminar archivo ==== */
+if ($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action'] ?? '')==='delete') {
+  $fid = (int)($_POST['id'] ?? 0);
+  try {
+    $st = $pdo->prepare("SELECT path FROM files WHERE id=? AND user_id=? LIMIT 1");
+    $st->execute([$fid, $uid]);
+    $path = $st->fetchColumn();
+    if ($path && is_file($path)) @unlink($path);
+    $pdo->prepare("DELETE FROM files WHERE id=? AND user_id=?")->execute([$fid, $uid]);
+    json_out(['ok'=>true]);
+  } catch(Throwable $e) {
+    json_out(['ok'=>false,'error'=>'Error al eliminar'],500);
+  }
+}
+
 /* ==== Endpoint AJAX (list.php?ajax=1&q=...) ==== */
 if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
   $q = trim($_GET['q'] ?? '');
   try {
     if ($q === '') {
-      // Últimos archivos si no hay query
       $st = $pdo->prepare("SELECT id,name,url,size_bytes,created_at
                            FROM files
                            WHERE user_id=?
@@ -49,7 +60,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
                            LIMIT 20");
       $st->execute([$uid]);
     } else {
-      // LIKE case-insensitive por collation utf8mb4_unicode_ci
       $like = '%'.$q.'%';
       $st = $pdo->prepare("SELECT id,name,url,size_bytes,created_at
                            FROM files
@@ -77,7 +87,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
 }
 
 /* ==== Render HTML (Ver mis archivos) ==== */
-// Datos del usuario para cabecera
 $st = $pdo->prepare("SELECT email,username,first_name,last_name,is_admin,is_deluxe,verified,quota_limit,api_key FROM users WHERE id=?");
 $st->execute([$uid]);
 $me = $st->fetch();
@@ -156,6 +165,7 @@ if (!$me) { header('Location: logout.php'); exit; }
             <div style="display:flex;gap:8px">
               <a class="btn" href="${esc(it.url)}" target="_blank">Abrir</a>
               <button class="btn ghost" type="button" data-url="${esc(it.url)}">Copiar URL</button>
+              <button class="btn" type="button" data-del="${it.id}">Eliminar</button>
             </div>
           </div>
         `).join('');
@@ -172,18 +182,36 @@ if (!$me) { header('Location: logout.php'); exit; }
   qInput?.addEventListener('input', deb);
   qBtn?.addEventListener('click', runSearch);
 
-  // Copiar URL con botón
+  // Copiar URL
   qRes.addEventListener('click', async (e)=>{
-    const b=e.target.closest('button[data-url]'); if(!b) return;
-    try{
-      await navigator.clipboard.writeText(b.dataset.url||'');
-      const old=b.textContent; b.textContent='¡Copiada!'; setTimeout(()=>b.textContent=old,1200);
-    }catch{
-      alert('No se pudo copiar automáticamente.\n'+(b.dataset.url||''));
+    const b=e.target.closest('button[data-url]');
+    if(b){
+      try{
+        await navigator.clipboard.writeText(b.dataset.url||'');
+        const old=b.textContent; b.textContent='¡Copiada!'; setTimeout(()=>b.textContent=old,1200);
+      }catch{
+        alert('No se pudo copiar automáticamente.\n'+(b.dataset.url||''));
+      }
+      return;
+    }
+    const d=e.target.closest('button[data-del]');
+    if(d){
+      if(!confirm("¿Seguro que quieres eliminar este archivo?")) return;
+      const id=d.dataset.del;
+      const r=await fetch('list.php',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'action=delete&id='+encodeURIComponent(id)
+      });
+      const j=await r.json();
+      if(j.ok){
+        d.closest('.r').remove();
+      }else{
+        alert("Error: "+(j.error||"no se pudo eliminar"));
+      }
     }
   });
 
-  // Cargar últimos archivos al abrir
   runSearch();
 </script>
 </body>
